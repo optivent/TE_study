@@ -1,3 +1,29 @@
+library(usethis)
+?use_github
+edit_r_environ()
+
+clean.it <- function() {
+  basic.packages <- c("package:stats","package:graphics",
+                      "package:grDevices","package:utils",
+                      "package:datasets","package:methods",
+                      "package:base")
+  package.list <- dplyr::setdiff( search()[ifelse(unlist(gregexpr("package:",search()))==1,TRUE,FALSE)] , basic.packages)
+  if (length(package.list)>0)  for(package in package.list) detach(package, character.only=TRUE)
+  ll <- dplyr::setdiff( ls(envir = globalenv()), ## objects to exclude from cleaning
+                        c("clean.it")) 
+  rm(list = ll, envir = globalenv()); gc() # or sessionInfo()
+  if(!require(pacman))install.packages("pacman")
+  pacman::p_load(here, 
+                 tidyverse,magrittr,
+                 stringi,zoo,here)
+}
+clean.it()
+
+path <- here("input")
+
+
+
+
 setwd("~/OneDrive/DATA_CODE/TE")
 clean.it <- function() {
   basic.packages <- c("package:stats","package:graphics","package:grDevices","package:utils","package:datasets","package:methods","package:base")
