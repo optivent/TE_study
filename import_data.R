@@ -31,19 +31,12 @@ clean.it <- function() {
 }
 clean.it()
 
-spss_data_n158 <- read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% as_tibble() 
-all_columns <- spss_data_n158 %>% colnames() 
-dim(spss_data_n158) # 307 columns
-
-spss_data_n158 %<>% janitor::remove_empty(c("rows", "cols")) 
-dim(spss_data_n158) # 245 columns
-#setdiff(all_columns, colnames(spss_data_n158)) %>% enframe() %>% View()
-
-spss_data_n158 %<>% janitor::clean_names() 
+spss_data_n158 <- read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% 
+                    as_tibble() %>% janitor::clean_names()
 
 spss_data_n158 %<>% rename(age_in_months = alter_monate, gender = geschlecht, weight = gewicht)
 colnames(spss_data_n158) <- colnames(spss_data_n158) %>% str_replace("x", "") %>% str_to_sentence()
-dim(spss_data_n158)
+
 
 library(purrr)
 labels_list <- spss_data_n158 %>% select_if(is.labelled) %>% 
@@ -100,15 +93,14 @@ dipidolor_qualitative$time %>% unique()
 head(dipidolor_qualitative, 10)
 
 dipidolor <- full_join(dipidolor_qualitative, dipidolor_quantitative) %>% 
-  #mutate_all(~ replace_na(., 0)) %>% 
-  dplyr::select(ID, time, everything()) %>% 
+  dplyr::rename(day_time = time) %>% 
+  separate(day_time, c("day", "time")) %>% 
   mutate(Dipidolor = pmax(value_qual,value_quan, na.rm = TRUE),
-         identity = (value_qual == value_quan))
-
+         identity = (value_qual == value_quan)) 
+  
 nrow(filter(dipidolor, identity == FALSE))
+dipidolor %<>% dplyr::select(ID, day, time, Dipidolor) 
 rm(dipidolor_qualitative, dipidolor_quantitative)
-
-dipidolor %<>% dplyr::select(ID, time, Dipidolor)
 
 
 ains <- spss_data_n158 %>%
@@ -137,16 +129,85 @@ ains <- spss_data_n158 %>%
   dplyr::select(sort(names(.))) %>% dplyr::select(ID, everything()) %>% 
   rowwise() %>% mutate_at( vars(-ID), ~ ifelse(is.na(.), NA, ifelse(. > 0, 1, .)) ) %>% 
   pivot_longer(-ID) %>% 
-  separate(name, c("A", "B", "drug")) %>% 
-  pivot_wider(id_cols = c(ID, A, B), names_from = drug, values_from = value) %>% 
-  unite("time", A:B, na.rm = TRUE, remove = TRUE, sep = "_")
+  separate(name, c("day", "time", "drug")) %>% 
+  pivot_wider(id_cols = c(ID, day, time), names_from = drug, values_from = value) 
+
+
+intervention <- full_join(ains, dipidolor) %>% arrange(ID, day, time) %>% 
+  mutate_at(vars(day, Diclofenac:Dipidolor), as.integer)
+
+
+per_day <- anti_join(intervention, dplyr::filter(intervention, day == 0 & time == 0)) %>% 
+  group_by(ID, day) %>% 
+  summarise_if(is.numeric, sum, na.rm = TRUE)
+
+scores <- spss_data_n158 %>% 
+  dplyr::select(matches("ID|kuss|faces|ppmd")) %>% 
+  dplyr::select(-matches("4_tag|5_tag|elternteil")) %>%
+  select_all(~str_replace_all(., "x", "")) %>% 
+  select_all(~str_replace_all(., "_wert", "")) %>% 
+  select_all(~str_replace_all(., "Awr", "0_0")) %>% 
+  select_all(~str_replace_all(., "4h", "0_1")) %>% 
+  select_all(~str_replace_all(., "8h", "0_2")) %>% 
+  select_all(~str_replace_all(., "tag_mo", "0")) %>% 
+  select_all(~str_replace_all(., "tag_mi", "1")) %>% 
+  select_all(~str_replace_all(., "tag_a", "2")) 
+
+Kuss <- scores %>% dplyr::select(matches("ID|kuss")) %>% 
+  select_all(~str_replace_all(., "_kuss", "")) 
+
+Kuss %>% map_dfr(~ round(100*mean(is.na(.)),2)) %>% pivot_longer(-ID, values_to = "percent_missing") %>%
+  dplyr::select(-1) %>% View() 
+
+Kuss %<>% select(-matches("15_15|1515"))
+colnames(Kuss)
+
+
+
   
   
+  
+  pivot_longer(-ID) %>%
+  rename(Kuss = value) %>% 
+  mutate(key = str_sub(name, 1, 3)) %>%
+  group_by(ID, key) %>% 
+  summarise_at(vars(Kuss), ~ sum(., na.rm = TRUE)) %>% 
+  arrange(ID, key) ->
+Kuss
+  
+
+scores %>% dplyr::select(matches("ID|faces")) %>% 
+  group_by(ID) %>% mutate_all(as.in)
+  select_all(~str_replace_all(., "_faces", "")) %>% 
+  pivot_longer(-ID) %>%
+  rename(Faces = value) %>% 
+  mutate(key = str_sub(name, 1, 3)) %>%
+  group_by(ID, key) %>% 
+  summarise_at(vars(Faces), ~ sum(., na.rm = TRUE)) %>% 
+  arrange(ID, key) ->
+Faces
 
 
-colnames(ains)
 
-library(purrr)
+#############
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 map_dfr(ains, ~ round(100*mean(is.na(.)),2)) %>%
   t() %>% as.data.frame(stringsAsFactors = FALSE) %>% rownames_to_column() %>%
@@ -164,42 +225,6 @@ map_dfr(ains, ~ dplyr::n_distinct(.)) %>%
       rename(column = rowname, percent_missing = V1)
   ) -> explore
 
-
-
-  
-ains <- ains %>% select(-3)%>%
-  select_all(~str_replace_all(., "tag_", "x")) %>%
-  select_all(~str_replace_all(., "Awr_", "0_1")) %>%
-  select_all(~str_replace_all(., "Op_x", "0_2")) %>% 
-  select_all(~str_replace_all(., "Awr_dipi_1ja", "0_0")) %>% 
-
-
-
-
-
-processed_data_n158 <- select(spss_data_n158, 
-              matches(admit_expression),
-             -matches(reject_expression)
-              ) %>% 
-  
-  
-  
-
-      select_all(~str_replace_all(., "tag_mo", "0")) %>%
-      select_all(~str_replace_all(., "tag_mi", "1")) %>%
-      select_all(~str_replace_all(., "tag_a", "2")) %>% 
-      select_all(~str_replace_all(., "_Wert", "")) %>%
-      select_all(~str_replace_all(., "Dipi__Gabe_JaNein", "dipidolor")) %>% 
-      select_all(~str_replace_all(., "dipi_1ja", "dipidolor")) %>% 
-      select_all(~str_replace_all(., "dipi_gabe_ja_nein", "dipidolor")) %>% 
-      select_all(~str_replace_all(., "AWR", "0.0")) %>%
-      select_all(~str_replace_all(., "4h", "0.1")) %>%
-      select_all(~str_replace_all(., "8h", "0.2")) %>%
-      rename(pseudoID = Pseudonym,
-             age_in_months = Alter_Monate,
-             gender = Geschlecht,
-             weight = Gewicht)
-             
 rm(admit_expression, reject_expression)
 
 
