@@ -31,16 +31,27 @@ clean.it <- function() {
 }
 clean.it()
 
+read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% select_if(is.labelled) %>% map(function(x) attr(x, 'labels')) 
+
 spss_data_n158 <- read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% 
                     as_tibble() %>% 
                     janitor::clean_names() %>% 
-                    rename(age_in_months = alter_monate, gender = geschlecht, weight = gewicht) %>% 
-                    unite("ID", 1:3, sep = "_", remove = TRUE, na.rm = FALSE) # the ID is composed from pseudonr, data and pat_ID
+                    rename(Age_in_months = alter_monate, Gender = geschlecht, Weight = gewicht, ID = nr) 
   
 colnames(spss_data_n158) <- colnames(spss_data_n158) %>% str_replace("x", "") %>% str_to_sentence() %>% str_replace("Id","ID")
 
+IID_measures <- spss_data_n158 %>%
+  select(c(ID:Fa_assistenzarzt, Fieber)) %>%
+  select(-matches("Alter|Vome_|Novalgin")) %>% 
+  mutate(ID = as.integer(ID), Gender = ifelse(Gender == 0, "m", "f")) %>% 
+  mutate_all(~ ifelse(is.na(.), mean(., na.rm = TRUE),.)) %>% 
+  mutate_if(is.double, ~ as.integer(.)) 
+
+plot_missing(IID_measures)
+glimpse(IID_measures)
+
+
 # there are some columns with labels, store the spss labels in a list.
-#labels_list <- spss_data_n158 %>% select_if(is.labelled) %>% map(function(x) attr(x, 'labels')) 
 
 
 dipidolor <- spss_data_n158 %>% 
@@ -56,6 +67,7 @@ dipidolor <- spss_data_n158 %>%
   select_all(~str_replace_all(., "tag_a", "2")) %>% 
   select_all(~str_replace_all(., "__", "_")) %>% 
   dplyr::rename('2_0_gabe_ja_nein' = '2_0_')
+
 
 dipidolor_quantitative <- dipidolor %>% dplyr::select(matches("ID|mg")) %>% 
   select_all(~str_replace_all(., "_mg", "")) %>% 
@@ -94,7 +106,8 @@ dipidolor <- full_join( dipidolor_quantitative, dipidolor_qualitative, by = c("I
     identity = (Dipi_qual == Dipi_binary)
   ) %>% dplyr::select(-c(identity, Dipi_qual)) %>% 
   tidyr::separate(col = "time", c("day", "time", "first_second")) %>% 
-  mutate(first_second = ifelse(is.na(first_second), "first", first_second))
+  mutate(first_second = ifelse(is.na(first_second), "first", first_second)) %>% 
+  transmute(ID, day, time, first_second, Dipi_mg = Dipi_quant, Dipi_binary)
 
 rm(dipidolor_qualitative, dipidolor_quantitative)
   
@@ -133,20 +146,31 @@ ains <- spss_data_n158 %>%
   select_all(~str_replace_all(., "_mg", "")) %>% 
   select_all(~str_replace_all(., "Awr", "0_0")) %>% 
   select_all(~str_replace_all(., "tag", "X")) %>% 
-  dplyr::select(sort(names(.))) %>% dplyr::select(ID, everything()) %>% 
-  rowwise() %>% mutate_at( vars(-ID), ~ ifelse(is.na(.), NA, ifelse(. > 0, 1, .)) ) %>% 
-  pivot_longer(-ID) %>% 
-  separate(name, c("day", "time", "drug")) %>% 
-  pivot_wider(id_cols = c(ID, day, time), names_from = drug, values_from = value) 
+  dplyr::select(sort(names(.))) %>% dplyr::select(ID, everything()) 
 
+# ains %>% mutate_all(~ replace_na(.,0)) %>% 
+#   summarise_at(vars(-ID), ~ n_distinct(.)-1) %>% 
+#   t() %>% as.data.frame() %>% rownames_to_column %>% 
+#   separate(rowname, c("day", "time", "Drug")) %>% 
+#   rename(DistinctValues = V1) %>% 
+#   arrange(day, time, Drug) %>% View()
 
-intervention <- full_join(ains, dipidolor) %>% arrange(ID, day, time) %>% 
-  mutate_at(vars(day, Diclofenac:Dipidolor), as.integer)
+ains <- pivot_longer(ains, -ID, values_to = "AINS_mg") %>% 
+  separate(name, c("day","time","AINS")) %>% 
+  mutate(AINS_binary = ifelse(AINS_mg > 0, 1, as.integer(AINS_mg))) %>% 
+  pivot_wider(id_cols = c(ID, day, time),
+              names_from = AINS,
+              values_from = c(AINS_mg, AINS_binary)) %>% 
+  dplyr::select(sort(names(.))) %>% dplyr::select(ID, day, time, everything())
 
+#intervention <- full_join(ains, dipidolor) %>% arrange(ID, day, time)
 
-per_day <- anti_join(intervention, dplyr::filter(intervention, day == 0 & time == 0)) %>% 
-  group_by(ID, day) %>% 
-  summarise_if(is.numeric, sum, na.rm = TRUE)
+###############
+
+# scores %>% map_df(~sum(is.na(.))) %>% pivot_longer(-ID) %>%
+#   transmute(name, percent = 100*value/nrow(scores)) %>%
+#   arrange(desc(percent)) %>% View() # percent of missing values
+# scores %>% dplyr::select(-matches("15_15")) %>% plot_missing()
 
 scores <- spss_data_n158 %>% 
   dplyr::select(matches("ID|kuss|faces|ppmd")) %>% 
@@ -158,90 +182,33 @@ scores <- spss_data_n158 %>%
   select_all(~str_replace_all(., "8h", "0_2")) %>% 
   select_all(~str_replace_all(., "tag_mo", "0")) %>% 
   select_all(~str_replace_all(., "tag_mi", "1")) %>% 
-  select_all(~str_replace_all(., "tag_a", "2")) 
-
-Kuss <- scores %>% dplyr::select(matches("ID|kuss")) %>% 
-  select_all(~str_replace_all(., "_kuss", "")) 
-
-Kuss %>% map_dfr(~ round(100*mean(is.na(.)),2)) %>% pivot_longer(-ID, values_to = "percent_missing") %>%
-  dplyr::select(-1) 
-
-Kuss %<>% select(-matches("15_15|1515")) %>% pivot_longer(-ID)
-
-
-
-  
-  
-  
-  pivot_longer(-ID) %>%
-  rename(Kuss = value) %>% 
-  mutate(key = str_sub(name, 1, 3)) %>%
-  group_by(ID, key) %>% 
-  summarise_at(vars(Kuss), ~ sum(., na.rm = TRUE)) %>% 
-  arrange(ID, key) ->
-Kuss
-  
-
-scores %>% dplyr::select(matches("ID|faces")) %>% 
-  group_by(ID) %>% mutate_all(as.in)
-  select_all(~str_replace_all(., "_faces", "")) %>% 
-  pivot_longer(-ID) %>%
-  rename(Faces = value) %>% 
-  mutate(key = str_sub(name, 1, 3)) %>%
-  group_by(ID, key) %>% 
-  summarise_at(vars(Faces), ~ sum(., na.rm = TRUE)) %>% 
-  arrange(ID, key) ->
-Faces
+  select_all(~str_replace_all(., "tag_a", "2")) %>% 
+  mutate(`0_1_faces` = as.double(`0_1_faces`)) %>% # this column was as charachter ...
+  select_all(~str_replace_all(., "1515", "15_15")) %>% 
+  rename(`0_0_15_kuss` = `0_0_kuss_15`, `0_0_15_faces` = `0_0_faces_15`) %>% 
+  dplyr::select(-matches("15_15")) %>% 
+  select_all(~str_replace_all(., "15", "second")) %>% 
+  select_all(~str_replace_all(., "_kuss", "#kuss")) %>% 
+  select_all(~str_replace_all(., "_faces", "#faces")) %>% 
+  select_all(~str_replace_all(., "_ppmd", "#ppmd")) %>% 
+  pivot_longer(-ID) %>% 
+  separate(name,  c("day_and_time", "scale"), sep = "#") %>% 
+  separate(day_and_time, c("day", "time", "first_second")) %>% 
+  mutate(first_second = ifelse(is.na(first_second), "first", first_second)) %>% 
+  pivot_wider(id_cols = c(ID:first_second), names_from = scale, values_from = value)
 
 
 
-#############
+###################
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-map_dfr(ains, ~ round(100*mean(is.na(.)),2)) %>%
-  t() %>% as.data.frame(stringsAsFactors = FALSE) %>% rownames_to_column() %>%
-  rename(column = rowname, percent_missing = V1) %>% arrange(percent_missing) %>%
-  filter(percent_missing < 90) %>% pull(column) -> cols_to_keep;
-medication <- select(medication, one_of(cols_to_keep)); rm(cols_to_keep)
-
-# examine the missing values, the distinct values 
-map_dfr(ains, ~ dplyr::n_distinct(.)) %>% 
-  t() %>% as.data.frame(stringsAsFactors = FALSE) %>% tibble::rownames_to_column() %>%
-  rename(column = rowname, distinct_values = V1) %>% 
-  full_join(
-    map_dfr(medication, ~ round(100*mean(is.na(.)),2)) %>% 
-      t() %>% as.data.frame(stringsAsFactors = FALSE) %>% rownames_to_column() %>%
-      rename(column = rowname, percent_missing = V1)
-  ) -> explore
-
-rm(admit_expression, reject_expression)
-
-
-admit_expression <- paste(
-  c("Pseudonym", "Geschlecht","Gewicht", "Alter_Monate", "_KUSS", "_Faces", "AWR_Dipi_1ja",
-    "_PPMD_", "Gabe", "_ml", "Erbrechen","Übelkeit","Nachblutung", "Fieber", "Antibiose", "Indikation_Dipi_2._Tag_mo"),
-  collapse = "|")
-reject_expression <- paste(
-  c("5","Station","Häufigkeit_","Eltern","_ohne_"),
-  collapse = "|")
-
+fluids_and_ponv <- spss_data_n158 %>%
+  select(c(Op_tag_trinkmennge_ml:Vome2)) %>% 
+  select(-matches("Nw|4|5|achblutung")) %>% 
+  select_all(~str_replace_all(., "Vome", "Vomex_")) %>% 
+  mutate_at(vars(Ubelkeit_erbrechen:Vomex_2),
+            ~ tidyr::replace_na(.,0)) %>% 
+  mutate_at(vars('Op_tag_trinkmennge_ml':'3_infusion_ml'),
+            ~ ifelse(is.na(.), mean(., na.rm = TRUE),.)) 
 
 
   
