@@ -19,7 +19,7 @@ clean.it <- function() {
   path <- here("input")
   
   pacman::p_load(here, haven, readxl, 
-                 tidyverse,magrittr,
+                 tidyverse,magrittr,purrr,
                  stringi,zoo,DataExplorer)
   
   rm(list = dplyr::setdiff( ls(envir = globalenv()),
@@ -32,31 +32,21 @@ clean.it <- function() {
 clean.it()
 
 spss_data_n158 <- read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% 
-                    as_tibble() %>% janitor::clean_names()
+                    as_tibble() %>% 
+                    janitor::clean_names() %>% 
+                    rename(age_in_months = alter_monate, gender = geschlecht, weight = gewicht) %>% 
+                    unite("ID", 1:3, sep = "_", remove = TRUE, na.rm = FALSE) # the ID is composed from pseudonr, data and pat_ID
+  
+colnames(spss_data_n158) <- colnames(spss_data_n158) %>% str_replace("x", "") %>% str_to_sentence() %>% str_replace("Id","ID")
 
-spss_data_n158 %<>% rename(age_in_months = alter_monate, gender = geschlecht, weight = gewicht)
-colnames(spss_data_n158) <- colnames(spss_data_n158) %>% str_replace("x", "") %>% str_to_sentence()
-
-
-library(purrr)
-labels_list <- spss_data_n158 %>% select_if(is.labelled) %>% 
-  map(function(x) attr(x, 'labels')) 
-
-# sapply(spss_data_n158, function(x) sum(is.na(x))) %>% enframe() %>%
-#   mutate(percent_missing = (100*value)/nrow(spss_data_n158)) %>% 
-#   arrange(desc(percent_missing)) %>% View()
-# threshold <- 72 # discard columns with more than 72 procent missing values
-# spss_data_n158  %<>% purrr::discard(~sum(is.na(.x))/length(.x)* 100 >= threshold) 
-# dim(spss_data_n158)
-
-spss_data_n158 %<>% unite("ID", 1:3, sep = "_", remove = TRUE, na.rm = FALSE)
-dim(spss_data_n158)
+# there are some columns with labels, store the spss labels in a list.
+#labels_list <- spss_data_n158 %>% select_if(is.labelled) %>% map(function(x) attr(x, 'labels')) 
 
 
 dipidolor <- spss_data_n158 %>% 
   dplyr::select(matches("ID|Dipi|dipi")) %>% 
-  dplyr::select(-matches("4_|5_tag|Indikation")) %>% 
-  dplyr::select(-c("Dipi_0nein_1ja","Haufigkeit_der_dipigabe")) %>% 
+  dplyr::select(-matches("4_|5_tag|Indikation")) %>% # just the first three days
+  dplyr::select(-c("Dipi_0nein_1ja","Haufigkeit_der_dipigabe")) %>% # we don't need now these columns
   select_all(~str_replace_all(., "Awr", "0_0")) %>% 
   select_all(~str_replace_all(., "4h", "0_1")) %>% 
   select_all(~str_replace_all(., "8h", "0_2")) %>% 
@@ -67,41 +57,58 @@ dipidolor <- spss_data_n158 %>%
   select_all(~str_replace_all(., "__", "_")) %>% 
   dplyr::rename('2_0_gabe_ja_nein' = '2_0_')
 
-dipidolor_quantitative <- dipidolor %>% dplyr::select(matches("ID|mg")) 
-dipidolor_quantitative %<>% rowwise() %>% mutate_at( vars(-ID), ~ ifelse(is.na(.), NA, ifelse(. > 0, 1, .)) ) 
-dipidolor_quantitative %<>% pivot_longer(-ID) %>% 
-  mutate(time = str_sub(name, 1, 3)) %>% 
-  group_by(ID, time) %>% 
-  summarise(value_quan = as.integer(sum(value, na.rm = TRUE))) %>% 
+dipidolor_quantitative <- dipidolor %>% dplyr::select(matches("ID|mg")) %>% 
+  select_all(~str_replace_all(., "_mg", "")) %>% 
+  select_all(~str_replace_all(., "_15", "_second")) %>% 
+  mutate(`0_0` = pmax(`0_0_nach_score2`, `0_0_pflege`, na.rm = TRUE)) %>% 
+  dplyr::select(ID, `0_0`, everything()) %>% 
+  dplyr::select(-c(`0_0_nach_score2`, `0_0_pflege`)) 
+plot_missing(dipidolor_quantitative)
+dipidolor_quantitative %<>% pivot_longer(-ID, values_to = "Dipi_quant", names_to = "time") %>% 
   arrange(ID, time)
 dipidolor_quantitative$time %>% unique()
 head(dipidolor_quantitative,10)
-  
-dipidolor_qualitative <- dipidolor %>% dplyr::select(matches("ID|ja")) 
-colnames(dipidolor_qualitative)
-dipidolor_qualitative %<>% as.data.frame(as.matrix()) %>% 
-  mutate_at(vars(-ID), ~ as.integer(.)) %>% 
-  mutate(ID = as.character(ID)) %>% 
-  pivot_longer(-ID) %>% 
-  mutate(time = str_sub(name, 1, 3)) %>% 
-  group_by(ID, time) %>% 
-  summarise(value_qual = as.integer(sum(value, na.rm = TRUE))) %>% 
-  #rename(value_qual = value) %>% 
-  dplyr::select(ID, time, value_qual) %>% 
-  arrange(ID, time)
+
+
+dipidolor_qualitative <- dipidolor %>% dplyr::select(matches("ID|ja")) %>% 
+  select_all(~str_replace_all(., "_gabe_ja_nein", "")) %>% 
+  rename(`0_0` = `0_0_1ja`, `0_0_second` = `0_0_15_1ja`) 
+plot_missing(dipidolor_qualitative)
+select(dipidolor_qualitative, -ID) %>% tidyr::gather() %>% pull(value) %>% unique() 
+dipidolor_qualitative %<>% mutate_at(vars(-ID), as.integer) 
+plot_missing(dipidolor_qualitative)
+select(dipidolor_qualitative, -ID) %>% tidyr::gather() %>% pull(value) %>% unique() #  1  0 NA  = all the values found in df
+dipidolor_qualitative %<>% pivot_longer(-ID, values_to = "Dipi_qual", names_to = "time") 
+head(dipidolor_qualitative,10)
+
 dipidolor_qualitative$time %>% unique()
-head(dipidolor_qualitative, 10)
+dipidolor_quantitative$time %>% unique()
 
-dipidolor <- full_join(dipidolor_qualitative, dipidolor_quantitative) %>% 
-  dplyr::rename(day_time = time) %>% 
-  separate(day_time, c("day", "time")) %>% 
-  mutate(Dipidolor = pmax(value_qual,value_quan, na.rm = TRUE),
-         identity = (value_qual == value_quan)) 
-  
-nrow(filter(dipidolor, identity == FALSE))
-dipidolor %<>% dplyr::select(ID, day, time, Dipidolor) 
+
+dipidolor <- full_join( dipidolor_quantitative, dipidolor_qualitative, by = c("ID", "time")) %>% 
+  mutate(
+    Dipi_binary = pmax(
+      ifelse(Dipi_quant > 0, 1, Dipi_quant),
+      Dipi_qual,
+      na.rm = TRUE), 
+    identity = (Dipi_qual == Dipi_binary)
+  ) %>% dplyr::select(-c(identity, Dipi_qual)) %>% 
+  tidyr::separate(col = "time", c("day", "time", "first_second")) %>% 
+  mutate(first_second = ifelse(is.na(first_second), "first", first_second))
+
 rm(dipidolor_qualitative, dipidolor_quantitative)
+  
+# dipidolor_per_time <- dipidolor %>%
+#   group_by(ID, day, time) %>% 
+#   summarise_at(vars(Dipi_quant, Dipi_binary), ~ sum(., na.rm = TRUE)) %>% 
+#   ungroup()
+# 
+# dipidolor_per_day <- dipidolor %>%
+#   group_by(ID, day) %>% 
+#   summarise_at(vars(Dipi_quant, Dipi_binary), ~ sum(., na.rm = TRUE)) %>% 
+#   ungroup()
 
+#naniar::gg_miss_upset(dipidolor)
 
 ains <- spss_data_n158 %>%
   dplyr::select(matches("ID|meta|nov|ibu|volt|par|per")) %>%
@@ -157,10 +164,9 @@ Kuss <- scores %>% dplyr::select(matches("ID|kuss")) %>%
   select_all(~str_replace_all(., "_kuss", "")) 
 
 Kuss %>% map_dfr(~ round(100*mean(is.na(.)),2)) %>% pivot_longer(-ID, values_to = "percent_missing") %>%
-  dplyr::select(-1) %>% View() 
+  dplyr::select(-1) 
 
-Kuss %<>% select(-matches("15_15|1515"))
-colnames(Kuss)
+Kuss %<>% select(-matches("15_15|1515")) %>% pivot_longer(-ID)
 
 
 
