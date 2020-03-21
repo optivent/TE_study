@@ -146,16 +146,8 @@ ains <- spss_data_n158 %>%
   select_all(~str_replace_all(., "_mg", "")) %>% 
   select_all(~str_replace_all(., "Awr", "0_0")) %>% 
   select_all(~str_replace_all(., "tag", "X")) %>% 
-  dplyr::select(sort(names(.))) %>% dplyr::select(ID, everything()) 
-
-# ains %>% mutate_all(~ replace_na(.,0)) %>% 
-#   summarise_at(vars(-ID), ~ n_distinct(.)-1) %>% 
-#   t() %>% as.data.frame() %>% rownames_to_column %>% 
-#   separate(rowname, c("day", "time", "Drug")) %>% 
-#   rename(DistinctValues = V1) %>% 
-#   arrange(day, time, Drug) %>% View()
-
-ains <- pivot_longer(ains, -ID, values_to = "AINS_mg") %>% 
+  dplyr::select(sort(names(.))) %>% dplyr::select(ID, everything()) %>% 
+  pivot_longer(-ID, values_to = "AINS_mg") %>% 
   separate(name, c("day","time","AINS")) %>% 
   mutate(AINS_binary = ifelse(AINS_mg > 0, 1, as.integer(AINS_mg))) %>% 
   pivot_wider(id_cols = c(ID, day, time),
@@ -163,7 +155,6 @@ ains <- pivot_longer(ains, -ID, values_to = "AINS_mg") %>%
               values_from = c(AINS_mg, AINS_binary)) %>% 
   dplyr::select(sort(names(.))) %>% dplyr::select(ID, day, time, everything())
 
-#intervention <- full_join(ains, dipidolor) %>% arrange(ID, day, time)
 
 ###############
 
@@ -197,20 +188,29 @@ scores <- spss_data_n158 %>%
   mutate(first_second = ifelse(is.na(first_second), "first", first_second)) %>% 
   pivot_wider(id_cols = c(ID:first_second), names_from = scale, values_from = value)
 
-
-
 ###################
 
 fluids_and_ponv <- spss_data_n158 %>%
-  select(c(Op_tag_trinkmennge_ml:Vome2)) %>% 
-  select(-matches("Nw|4|5|achblutung")) %>% 
+  select(c(ID, Op_tag_trinkmennge_ml:Vome2)) %>% 
+  select(-matches("Nw|4|5|achblutung|keit_erb|keit")) %>% 
   select_all(~str_replace_all(., "Vome", "Vomex_")) %>% 
-  mutate_at(vars(Ubelkeit_erbrechen:Vomex_2),
-            ~ tidyr::replace_na(.,0)) %>% 
-  mutate_at(vars('Op_tag_trinkmennge_ml':'3_infusion_ml'),
-            ~ ifelse(is.na(.), mean(., na.rm = TRUE),.)) 
+  select_all(~str_replace_all(., "_ml", "")) %>%
+  select_all(~str_replace_all(., "_tag", "")) %>%
+  select_all(~str_replace_all(., "Op_", "0_")) %>%
+  mutate_at(vars('Erbrechen_op':'Vomex_2'), ~ tidyr::replace_na(.,0)) %>% 
+  rename('0_Vomex' = 'Vomex_', '2_Vomex' = 'Vomex_2', '1_Vomex' = 'Vomex_1',
+         '0_trinkmenge' = '0_trinkmennge', 
+         '0_Erbrechen' = 'Erbrechen_op', '1_Erbrechen' = 'Erbrechen_1', '2_Erbrechen' = 'Erbrechen_2_uhrzeit') %>% 
+  mutate_all(~as.integer(.)) %>% 
+  mutate_at(vars('0_infusion':'3_infusion'), ~ tidyr::replace_na(.,0)) %>% 
+  pivot_longer(-ID) %>% 
+  separate(name, c("day", "categ"))
+  
 
 
+
+#mutate_at(vars('Op_tag_trinkmennge_ml':'3_tag_trinkmenge_ml'), ~ ifelse(is.na(.), mean(., na.rm = TRUE),.)) 
+#################
   
 library(xlsx)
 write.xlsx(processed_data_n158, file = "before_after.xlsx",
