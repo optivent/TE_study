@@ -1,11 +1,9 @@
-#start_header {
-  # reference GIT YT kL6L2MNqPHg
-  # library(usethis)
-  # ?use_github
-  # edit_r_environ()
-  # use_github(protocol = "https", auth_token = Sys.getenv("GITHUB_PAT"))
-  # install.packages("here")
-}
+# reference GIT YT kL6L2MNqPHg
+# library(usethis)
+# ?use_github
+# edit_r_environ()
+# use_github(protocol = "https", auth_token = Sys.getenv("GITHUB_PAT"))
+# install.packages("here")
 
 clean.it <- function() {
   basic.packages <- c("package:stats","package:graphics",
@@ -18,7 +16,7 @@ clean.it <- function() {
   
   path <- here("input")
   
-  pacman::p_load(here, haven, readxl, 
+  pacman::p_load(here, haven, readxl, VIM,
                  tidyverse,magrittr,purrr,
                  stringi,zoo,DataExplorer)
   
@@ -46,6 +44,10 @@ IID_measures <- spss_data_n158 %>%
   mutate(ID = as.integer(ID), Gender = ifelse(Gender == 0, "m", "f")) %>% 
   mutate_all(~ ifelse(is.na(.), mean(., na.rm = TRUE),.)) %>% 
   mutate_if(is.double, ~ as.integer(.)) 
+
+IID_measures %>% 
+
+aggr(col=c('navyblue','red'), cex.axis=.7, gap=3, numbers=TRUE, sortVars=TRUE, ylab=c("Histogram of missing data","Pattern"))
 
 plot_missing(IID_measures)
 glimpse(IID_measures)
@@ -121,7 +123,7 @@ rm(dipidolor_qualitative, dipidolor_quantitative)
 #   summarise_at(vars(Dipi_quant, Dipi_binary), ~ sum(., na.rm = TRUE)) %>% 
 #   ungroup()
 
-#naniar::gg_miss_upset(dipidolor)
+naniar::gg_miss_upset(dipidolor)
 
 ains <- spss_data_n158 %>%
   dplyr::select(matches("ID|meta|nov|ibu|volt|par|per")) %>%
@@ -202,31 +204,82 @@ fluids_and_ponv <- spss_data_n158 %>%
          '0_trinkmenge' = '0_trinkmennge', 
          '0_Erbrechen' = 'Erbrechen_op', '1_Erbrechen' = 'Erbrechen_1', '2_Erbrechen' = 'Erbrechen_2_uhrzeit') %>% 
   mutate_all(~as.integer(.)) %>% 
-  mutate_at(vars('0_infusion':'3_infusion'), ~ tidyr::replace_na(.,0)) %>% 
+  mutate_at(vars('0_infusion':'3_infusion'), ~ tidyr::replace_na(.,0))
+
+fluids_and_ponv %>% aggr(col=c('navyblue','red'), cex.axis=.7, gap=3,
+     numbers=TRUE, sortVars=TRUE, #labels=names(df),
+     ylab=c("Histogram of missing data","Pattern"))
+fluids_and_ponv %>% filter_at(vars(ID:Fieber), any_vars(is.na(.))) %>% naniar::gg_miss_upset()
+
+fluids_and_ponv %>% 
+  full_join(
+  IID_measures %>% select(ID, Age_in_months, Weight, Fieber), by = "ID"
+  ) %>% 
+  filter_at(vars(ID:Fieber), any_vars(is.na(.))) %>%
+  View()  
+
+# library(missRanger)
+# fluids_and_ponv %<>%  full_join(IID_measures %>% select(ID, Age_in_months, Weight, Fieber), by = "ID") 
+# original_colnames <- colnames(fluids_and_ponv)
+# fluids_and_ponv %<>% rename_all( ~ LETTERS[1:length(original_colnames)])
+# fluids_and_ponv %<>% missRanger::missRanger(
+#     . ~ . -A,
+#   num.trees = 1000, maxiter = 100, pmm.k = 5
+#   ) %>% 
+#   rename_all( ~ original_colnames) # %>% 
+#   dplyr::select(-c(Age_in_months, Weight, Fieber))
+
+fluids_and_ponv %<>%
   pivot_longer(-ID) %>% 
-  separate(name, c("day", "categ"))
+  separate(name, c("day", "category"), remove = TRUE) %>% 
+  pivot_wider(id_cols = c(ID, day), names_from = category, values_from = value) %>% 
+  mutate_at(vars(Erbrechen, Vomex), ~ tidyr::replace_na(.,0))
   
+#plot_missing(fluids_and_ponv)
+
+
+test <- fluids_and_ponv %>% 
+  #filter(ID %in% list_of_pat_NA_trinkmenge) %>% 
+  left_join(dplyr::select(IID_measures, c(ID, Age = Age_in_months, Weight, Fieber)), by = "ID") %>% 
+  missRanger::missRanger(
+        . ~ . -ID,
+       num.trees = 1000, maxiter = 100, pmm.k = 5
+       )
 
 
 
-#mutate_at(vars('Op_tag_trinkmennge_ml':'3_tag_trinkmenge_ml'), ~ ifelse(is.na(.), mean(., na.rm = TRUE),.)) 
-#################
-  
-library(xlsx)
-write.xlsx(processed_data_n158, file = "before_after.xlsx",
-           sheetName = "Sheet1", 
-           col.names = TRUE, append = FALSE)
+###################
+library(mitml)
+data(studentratings)
 
+fml <- ReadAchiev + ReadDis + SchClimate ~ 1 + (1|ID)
+imp <- panImpute(studentratings,
+                 formula=fml,
+                 n.burn=1000, n.iter=100, m=100)
+summary(imp)
+plot(imp, trace="all", print="beta", pos=c(1,2))
 
-cbind(colnames(processed_data_n158), colnames(test)) %>% as.data.frame()
+implist <- mitmlComplete(imp, "all")
 
+library(lme4)
+fit <- with(mitmlComplete(imp, "all"),
+            lmer(ReadAchiev ~ 1 + ReadDis + (1|ID))
+            )
 
-write.xlsx(TE2, file = "TE2.xlsx", col.names = TRUE, row.names = TRUE)
-  
-
-
-
-  
-
-
-
+test <- testEstimates(fit, var.comp=TRUE)
+##############
+library(jomo)
+# make sure sex is a factor:
+cldata<-within(cldata, sex<-factor(sex))
+# we define the data frame with all the variables
+data<-cldata[,c("measure","age", "sex", "city")]
+# And the formula of the substantive lm model
+# sex as an outcome only because it is the only binary variable in the dataset...
+formula<-as.formula(sex~age+measure+(1|city))
+#And finally we run the imputation function:
+imp<-jomo.glmer(formula,data, nburn=2, nbetween=2, nimp=2)
+# Note we are using only 2 iterations to avoid time consuming examples,
+# which go against CRAN policies. In real applications we would use
+# much larger burn-ins (around 1000) and at least 5 imputations.
+# Check help page for function jomo to see how to fit the model and
+# combine estimates with Rubin's rules
