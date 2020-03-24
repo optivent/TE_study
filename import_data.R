@@ -222,26 +222,6 @@ fluids_and_ponv <- fluids_and_ponv %>% pivot_longer(-ID) %>%
   #   num.trees = 1000, maxiter = 100, pmm.k = 5
   # ) %>% dplyr::select(ID:Vomex) %>% dplyr::select(-missing) %>% 
 
-summary_per_day <- 
-list(ains, dipidolor, fluids_and_ponv, scores) %>% 
-  map( ~ mutate(.x, ID = as.integer(ID), day = as.character(day))) %>% 
-  map( ~ group_by(.x, ID, day)) %>% 
-  map( ~ summarise_if(.x, is.numeric,
-          list( ~ min(., na.rm = TRUE),
-                ~ max(., na.rm = TRUE),
-                ~ median(., na.rm = TRUE),
-                ~ mean(., na.rm = TRUE),
-                ~ sum(., na.rm = TRUE),
-                ~ diff(range(., na.rm = TRUE))
-                )
-         )
-  ) %>% 
-  reduce(full_join, by = c("ID", "day")) %>% 
-  full_join(IID_measures, by = "ID") %>% 
-  ungroup() %>% 
-  mutate(ID = as.factor(ID), day = as.factor(day)) %>% 
-  mutate_if(is.numeric, ~ ifelse(is.infinite(.), NA, .))
-
 
 r <- list(ains, dipidolor, fluids_and_ponv, scores)
 names(r) <- c("ains", "dipidolor", "fluids_and_ponv", "scores")
