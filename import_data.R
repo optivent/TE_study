@@ -225,7 +225,6 @@ fluids_and_ponv <- fluids_and_ponv %>% pivot_longer(-ID) %>%
 summary_per_day <- 
 list(ains, dipidolor, fluids_and_ponv, scores) %>% 
   map( ~ mutate(.x, ID = as.integer(ID), day = as.character(day))) %>% 
-  map( ~ arrange(.x, ID)) %>% 
   map( ~ group_by(.x, ID, day)) %>% 
   map( ~ summarise_if(.x, is.numeric,
           list( ~ min(., na.rm = TRUE),
@@ -243,23 +242,10 @@ list(ains, dipidolor, fluids_and_ponv, scores) %>%
   mutate(ID = as.factor(ID), day = as.factor(day)) %>% 
   mutate_if(is.numeric, ~ ifelse(is.infinite(.), NA, .))
 
-summary_per_day %>% map_dfr( ~ round(100*mean(is.na(.)),2)) %>% 
-  pivot_longer(everything()) %>% arrange(desc(value)) %>% View()
-
-
-summary_per_ID <- summary_per_day %>%
-  pivot_wider(id_cols = ID, names_from = day, values_from = -matches("ID|day")) %>% 
-  janitor::remove_empty("cols") %>% 
-  mutate(count_na = rowSums(is.na(.)))
-
-summary_per_ID %>% dplyr::select(ID, count_na) %>%
-  arrange(desc(count_na)) %>% View()
-
-summary_per_ID %>% map_dfr( ~ round(100*mean(is.na(.)),2)) %>% 
-  pivot_longer(everything()) %>% arrange(desc(value)) %>% View()
 
 r <- list(ains, dipidolor, fluids_and_ponv, scores)
 names(r) <- c("ains", "dipidolor", "fluids_and_ponv", "scores")
 rm(ains, dipidolor, fluids_and_ponv, scores)
 
 save.image(file = paste0(here("input"), "/TE_data.RData"))
+
