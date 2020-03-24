@@ -209,77 +209,57 @@ fluids_and_ponv <- spss_data_n158 %>%
 fluids_and_ponv %>% aggr(col=c('navyblue','red'), cex.axis=.7, gap=3,
      numbers=TRUE, sortVars=TRUE, #labels=names(df),
      ylab=c("Histogram of missing data","Pattern"))
-fluids_and_ponv %>% filter_at(vars(ID:Fieber), any_vars(is.na(.))) %>% naniar::gg_miss_upset()
 
-fluids_and_ponv %>% 
-  full_join(
-  IID_measures %>% select(ID, Age_in_months, Weight, Fieber), by = "ID"
-  ) %>% 
-  filter_at(vars(ID:Fieber), any_vars(is.na(.))) %>%
-  View()  
 
-# library(missRanger)
-# fluids_and_ponv %<>%  full_join(IID_measures %>% select(ID, Age_in_months, Weight, Fieber), by = "ID") 
 # original_colnames <- colnames(fluids_and_ponv)
 # fluids_and_ponv %<>% rename_all( ~ LETTERS[1:length(original_colnames)])
-# fluids_and_ponv %<>% missRanger::missRanger(
-#     . ~ . -A,
-#   num.trees = 1000, maxiter = 100, pmm.k = 5
-#   ) %>% 
-#   rename_all( ~ original_colnames) # %>% 
-#   dplyr::select(-c(Age_in_months, Weight, Fieber))
 
-fluids_and_ponv %<>%
-  pivot_longer(-ID) %>% 
+
+fluids_and_ponv <- fluids_and_ponv %>% pivot_longer(-ID) %>% 
   separate(name, c("day", "category"), remove = TRUE) %>% 
   pivot_wider(id_cols = c(ID, day), names_from = category, values_from = value) %>% 
-  mutate_at(vars(Erbrechen, Vomex), ~ tidyr::replace_na(.,0))
-  
-#plot_missing(fluids_and_ponv)
+  mutate_at(vars(Erbrechen, Vomex), ~ tidyr::replace_na(.,0)) 
+  # left_join(dplyr::select(IID_measures, c(ID, Age = Age_in_months, Weight, Fieber)), by = "ID") %>% 
+  # mutate(missing = ifelse(is.na(trinkmenge), "*", "")) %>% 
+  # dplyr::select(ID, day, missing, everything()) %>% 
+  # missRanger::missRanger(
+  #   . ~ . -ID -missing -Vomex,
+  #   num.trees = 1000, maxiter = 100, pmm.k = 5
+  # ) %>% dplyr::select(ID:Vomex) %>% dplyr::select(-missing) %>% 
+
+summary_per_day <- 
+list(ains, dipidolor, fluids_and_ponv, scores) %>% 
+  map( ~ mutate(.x, ID = as.integer(ID), day = as.character(day))) %>% 
+  map( ~ arrange(.x, ID)) %>% 
+  map( ~ group_by(.x, ID, day)) %>% 
+  map( ~ summarise_if(.x, is.numeric,
+          list( ~ min(., na.rm = TRUE),
+                ~ max(., na.rm = TRUE),
+                ~ median(., na.rm = TRUE),
+                ~ mean(., na.rm = TRUE),
+                ~ sum(., na.rm = TRUE),
+                ~ diff(range(., na.rm = TRUE))
+                )
+         )
+  ) %>% 
+  reduce(full_join, by = c("ID", "day")) %>% 
+  full_join(IID_measures, by = "ID") %>% 
+  ungroup() %>% 
+  mutate(ID = as.factor(ID), day = as.factor(day)) %>% 
+  mutate_if(is.numeric, ~ ifelse(is.infinite(.), NA, .))
+
+summary_per_day %>% map_dfr( ~ round(100*mean(is.na(.)),2)) %>% 
+  pivot_longer(everything()) %>% arrange(desc(value)) %>% View()
 
 
-test <- fluids_and_ponv %>% 
-  #filter(ID %in% list_of_pat_NA_trinkmenge) %>% 
-  left_join(dplyr::select(IID_measures, c(ID, Age = Age_in_months, Weight, Fieber)), by = "ID") %>% 
-  missRanger::missRanger(
-        . ~ . -ID,
-       num.trees = 1000, maxiter = 100, pmm.k = 5
-       )
+summary_per_ID <- summary_per_day %>%
+  pivot_wider(id_cols = ID, names_from = day, values_from = -matches("ID|day")) %>% 
+  janitor::remove_empty("cols") %>% 
+  mutate(count_na = rowSums(is.na(.)))
 
+summary_per_ID %>% dplyr::select(ID, count_na) %>%
+  arrange(desc(count_na)) %>% View()
 
+summary_per_ID %>% map_dfr( ~ round(100*mean(is.na(.)),2)) %>% 
+  pivot_longer(everything()) %>% arrange(desc(value)) %>% View()
 
-###################
-library(mitml)
-data(studentratings)
-
-fml <- ReadAchiev + ReadDis + SchClimate ~ 1 + (1|ID)
-imp <- panImpute(studentratings,
-                 formula=fml,
-                 n.burn=1000, n.iter=100, m=100)
-summary(imp)
-plot(imp, trace="all", print="beta", pos=c(1,2))
-
-implist <- mitmlComplete(imp, "all")
-
-library(lme4)
-fit <- with(mitmlComplete(imp, "all"),
-            lmer(ReadAchiev ~ 1 + ReadDis + (1|ID))
-            )
-
-test <- testEstimates(fit, var.comp=TRUE)
-##############
-library(jomo)
-# make sure sex is a factor:
-cldata<-within(cldata, sex<-factor(sex))
-# we define the data frame with all the variables
-data<-cldata[,c("measure","age", "sex", "city")]
-# And the formula of the substantive lm model
-# sex as an outcome only because it is the only binary variable in the dataset...
-formula<-as.formula(sex~age+measure+(1|city))
-#And finally we run the imputation function:
-imp<-jomo.glmer(formula,data, nburn=2, nbetween=2, nimp=2)
-# Note we are using only 2 iterations to avoid time consuming examples,
-# which go against CRAN policies. In real applications we would use
-# much larger burn-ins (around 1000) and at least 5 imputations.
-# Check help page for function jomo to see how to fit the model and
-# combine estimates with Rubin's rules
