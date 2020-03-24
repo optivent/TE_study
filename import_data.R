@@ -45,12 +45,7 @@ IID_measures <- spss_data %>%
   mutate_all(~ ifelse(is.na(.), mean(., na.rm = TRUE),.)) %>% 
   mutate_if(is.double, ~ as.integer(.)) 
 
-IID_measures %>% 
-
-aggr(col=c('navyblue','red'), cex.axis=.7, gap=3, numbers=TRUE, sortVars=TRUE, ylab=c("Histogram of missing data","Pattern"))
-
-plot_missing(IID_measures)
-glimpse(IID_measures)
+IID_measures %>% aggr(col=c('navyblue','red'), cex.axis=.7, gap=3, numbers=TRUE, sortVars=TRUE, ylab=c("Histogram of missing data","Pattern"))
 
 
 # there are some columns with labels, store the spss labels in a list.
@@ -122,8 +117,8 @@ rm(dipidolor_qualitative, dipidolor_quantitative)
 #   group_by(ID, day) %>% 
 #   summarise_at(vars(Dipi_quant, Dipi_binary), ~ sum(., na.rm = TRUE)) %>% 
 #   ungroup()
+plot_missing(dipidolor)
 
-naniar::gg_miss_upset(dipidolor)
 
 ains <- spss_data %>%
   dplyr::select(matches("ID|meta|nov|ibu|volt|par|per")) %>%
@@ -263,3 +258,8 @@ summary_per_ID %>% dplyr::select(ID, count_na) %>%
 summary_per_ID %>% map_dfr( ~ round(100*mean(is.na(.)),2)) %>% 
   pivot_longer(everything()) %>% arrange(desc(value)) %>% View()
 
+r <- list(ains, dipidolor, fluids_and_ponv, scores)
+names(r) <- c("ains", "dipidolor", "fluids_and_ponv", "scores")
+rm(ains, dipidolor, fluids_and_ponv, scores)
+
+save.image(file = paste0(here("input"), "/TE_data.RData"))

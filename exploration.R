@@ -22,6 +22,5 @@ clean.it <- function() {
 }
 clean.it()
 
-path <- here("input")
-load(paste0(path, "/TE_data.RData"))
+load(paste0(here("input"), "/TE_data.RData"))
 
