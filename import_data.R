@@ -31,14 +31,14 @@ clean.it()
 
 read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% select_if(is.labelled) %>% map(function(x) attr(x, 'labels')) 
 
-spss_data_n158 <- read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% 
+spss_data <- read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% 
                     as_tibble() %>% 
                     janitor::clean_names() %>% 
                     rename(Age_in_months = alter_monate, Gender = geschlecht, Weight = gewicht, ID = nr) 
   
-colnames(spss_data_n158) <- colnames(spss_data_n158) %>% str_replace("x", "") %>% str_to_sentence() %>% str_replace("Id","ID")
+colnames(spss_data) <- colnames(spss_data) %>% str_replace("x", "") %>% str_to_sentence() %>% str_replace("Id","ID")
 
-IID_measures <- spss_data_n158 %>%
+IID_measures <- spss_data %>%
   select(c(ID:Fa_assistenzarzt, Fieber)) %>%
   select(-matches("Alter|Vome_|Novalgin")) %>% 
   mutate(ID = as.integer(ID), Gender = ifelse(Gender == 0, "m", "f")) %>% 
@@ -56,7 +56,7 @@ glimpse(IID_measures)
 # there are some columns with labels, store the spss labels in a list.
 
 
-dipidolor <- spss_data_n158 %>% 
+dipidolor <- spss_data %>% 
   dplyr::select(matches("ID|Dipi|dipi")) %>% 
   dplyr::select(-matches("4_|5_tag|Indikation")) %>% # just the first three days
   dplyr::select(-c("Dipi_0nein_1ja","Haufigkeit_der_dipigabe")) %>% # we don't need now these columns
@@ -125,7 +125,7 @@ rm(dipidolor_qualitative, dipidolor_quantitative)
 
 naniar::gg_miss_upset(dipidolor)
 
-ains <- spss_data_n158 %>%
+ains <- spss_data %>%
   dplyr::select(matches("ID|meta|nov|ibu|volt|par|per")) %>%
   dplyr::select(-matches("4_|5_|Vome|Nw")) %>% 
   mutate(Awr_novalgin_mg = as.double(Awr_novalgin_mg)) %>% 
@@ -165,7 +165,7 @@ ains <- spss_data_n158 %>%
 #   arrange(desc(percent)) %>% View() # percent of missing values
 # scores %>% dplyr::select(-matches("15_15")) %>% plot_missing()
 
-scores <- spss_data_n158 %>% 
+scores <- spss_data %>% 
   dplyr::select(matches("ID|kuss|faces|ppmd")) %>% 
   dplyr::select(-matches("4_tag|5_tag|elternteil")) %>%
   select_all(~str_replace_all(., "x", "")) %>% 
@@ -192,7 +192,7 @@ scores <- spss_data_n158 %>%
 
 ###################
 
-fluids_and_ponv <- spss_data_n158 %>%
+fluids_and_ponv <- spss_data %>%
   select(c(ID, Op_tag_trinkmennge_ml:Vome2)) %>% 
   select(-matches("Nw|4|5|achblutung|keit_erb|keit")) %>% 
   select_all(~str_replace_all(., "Vome", "Vomex_")) %>% 
