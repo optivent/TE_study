@@ -38,48 +38,38 @@ DiffAbs <- function(x) {
 # the ppmd scores are not taken twice, this operation is not for ppmd
 # all variables are converted to integer
 
-r$scores %>% group_by(ID) %>% 
+scores <- r$scores %>% group_by(ID) %>% 
   summarise_at( vars(kuss, faces) , ~ length(unique(.)) ) %>% 
   mutate(category = ifelse(kuss > faces, "KUSS", "FACES")) %>% select(-c(kuss:faces)) %>% 
   full_join(r$scores) %>% 
-  select(category, everything())
-  
-  
-  
-  
-  
-  
-  group_by(ID, day, time) %>% 
-    summarise_at(
-      vars(kuss:ppmd),
-      list(
-        first = first,
-        DiffAbs = DiffAbs # there is insufficient data for a quantitative approach !!
-           )
-    ) %>% 
-  ungroup() %>% 
-  rename(ppmd = ppmd_first) %>% select(-ppmd_DiffAbs) %>% 
-  mutate_all( ~ as.integer(.)) %>% 
-  group_by(ID) %>% 
-  summarise_at( vars(kuss_first, faces_first) , ~ length(unique(.)) ) %>% 
-  mutate(category = ifelse(kuss_first > faces_first, "KUSS", "FACES")) %>% select(-matches("first")) %>% 
-full_join(r$scores %>% mutate(ID = as.integer(ID))) %>%
   select(category, everything()) %>% 
-  mutate_at(vars(matches("Diff")), ~ replace_na(., 0)) %>% 
-mutate(first = pmax(kuss_first, faces_first, na.rm = TRUE),
-       diff_score = pmax(kuss_DiffAbs, faces_DiffAbs, na.rm = TRUE)) %>% 
-select(-c(kuss_first, faces_first, kuss_DiffAbs, faces_DiffAbs)) %>% 
-  split(.$category) 
+  group_by(category, ID,day,time) %>% 
+    summarise_at(vars(kuss:ppmd), 
+               list(first = first, 
+                    diff = function(x) { dplyr::first(x) - dplyr::last(x) }
+                    )
+    ) %>%
+  ungroup() %>% 
+  transmute(category, ID, day, time,
+            scale = pmax(kuss_first, faces_first, na.rm = TRUE),
+            diff = pmax(kuss_diff, faces_diff, na.rm = TRUE) %>% replace_na(.,0),
+            ppmd = ppmd_first
+  ) %>% mutate_at(vars(-category), ~ as.integer(.)) %>% 
+  arrange(ID, day, time,) %>% split(.$ID) %>% 
+  #map_dfr( ~ .x %>% fill(names(.x), .direction = "downup")) %>%   # least observation called forward and backward
+  split(.$category) #%>% 
+  map(~ .x %>% select(-category))
+
+scores_wide <- scores %>%
+  map_dfr(~ pivot_wider(data = .x, id_cols = c(ID:time), names_from = time, names_prefix = "time_", values_from = c(scale:ppmd)) )
+                                                     
+scores %>% map
 
 
-function(x) {
-  dplyr::first(x) - dplyr::last(x) 
-}
-
-# for the goal of making a pain-scale, we have to drop the difference between first and second measure
-# this difference can be used to assess the eficaccy of the analgetics
-
-
+  
+  
+  
+  
 
 
 
