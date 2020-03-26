@@ -276,8 +276,8 @@ fluids_and_ponv <- spss_data %>%
 # ) %>% dplyr::select(ID:Vomex) %>% dplyr::select(-missing) %>% 
 
 
-rawlist <- list(ains, dipidolor, fluids_and_ponv, scores, IID_measures)
-names(rawlist) <- c("ains", "dipidolor", "fluids", "scores", "IID")
+rawlong <- list(ains, dipidolor, fluids_and_ponv, scores, IID_measures)
+names(rawlong) <- c("ains", "dipidolor", "fluids", "scores", "IID")
 rm(ains, dipidolor, fluids_and_ponv, scores, IID_measures, spss_data)
 
 save.image(file = paste0(here("input"), "/TE_data.RData"))
