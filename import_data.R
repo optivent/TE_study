@@ -1,9 +1,5 @@
-# reference GIT YT kL6L2MNqPHg
-# library(usethis)
-# ?use_github
-# edit_r_environ()
-# use_github(protocol = "https", auth_token = Sys.getenv("GITHUB_PAT"))
-# install.packages("here")
+###### header #######
+# reference GIT YT kL6L2MNqPHg # library(usethis) # ?use_github # edit_r_environ() # use_github(protocol = "https", auth_token = Sys.getenv("GITHUB_PAT"))
 
 clean.it <- function() {
   basic.packages <- c("package:stats","package:graphics",
@@ -26,12 +22,24 @@ clean.it <- function() {
      envir = globalenv())
   #gc() # or sessionInfo()
   
+}; clean.it()
+
+null_and_missing <- function(df) {
+  result <- map_df(df, ~ sum(is.na(dplyr::na_if(.,0)))) %>% pivot_longer(everything()) %>% arrange(desc(value))
+  return(result)
 }
-clean.it()
+
+select_cutoff <- function(df, cutoff){
+  cols_to_keep <- filter(pivot_longer(map_df(df, ~ sum(is.na(dplyr::na_if(.,0)))), everything()), value < cutoff)$name
+  result <- dplyr::select(df, one_of(cols_to_keep))
+  return(result)
+}
+
+
 
 ##### import rowdata #####
 
-read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% select_if(is.labelled) %>% map(function(x) attr(x, 'labels')) 
+#read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% select_if(is.labelled) %>% map(function(x) attr(x, 'labels')) # the SPSS labels
 
 spss_data <- read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% 
                     as_tibble() %>% 
@@ -43,19 +51,29 @@ colnames(spss_data) <- colnames(spss_data) %>% str_replace("x", "") %>% str_to_s
 
 
 ##### IID_measures #####
+# Gender 0 = m, 1 = f
 
 IID_measures <- spss_data %>%
   select(c(ID:Fa_assistenzarzt, Fieber, Nachblutung:Entlassungtag_post_op)) %>%
-  select(-matches("Alter|Vome_|Novalgin")) %>% 
-  mutate(ID = as.integer(ID), Gender = ifelse(Gender == 0, "m", "f")) %>% 
+  select(-matches("Pseudonym|Ubereinstimm|Nw_zeit|Datum|Alter|Vome_|Novalgin")) %>% 
   mutate_if(is.double, ~ as.integer(.)) 
 
-# there are some columns with labels, store the spss labels in a list.
-IID_measures %>% aggr(col=c('navyblue','red'), cex.axis=.7, gap=3, numbers=TRUE, sortVars=TRUE, ylab=c("Histogram of missing data","Pattern"))
+IID_measures %>% null_and_missing()
 
+IID_measures %<>% select_cutoff(cutoff = 125)
 
+IID_measures %<>% rename(Dipidolor_01 = Dipi_0nein_1ja,
+                         Sum_Dipigabe = Haufigkeit_der_dipigabe,
+                         Dipi_Indik.nicht_erhalten = Indikation_fur_dipi_aber_nicht_erhalten,
+                         ) %>% 
+                  select_all(~str_replace_all(., "_post_op", "")) %>%
+                  select_all(~str_replace_all(., "2", "")) %>%
+                  select_all(~str_replace_all(., "anz_der_umstechungen", "Umstechungen"))
 
-##### Dipidlor #####
+                  
+  
+  
+##### Dipidolor #####
 
 dipidolor <- spss_data %>% 
   dplyr::select(matches("ID|Dipi|dipi")) %>% 
@@ -115,7 +133,6 @@ dipidolor <- full_join( dipidolor_quantitative, dipidolor_qualitative, by = c("I
   transmute(ID, day = as.integer(day), time = as.integer(time), Dipi = Dipi_µgperKg, Dipi_repeat)
   
   
-
 rm(dipidolor_qualitative, dipidolor_quantitative)
 
 
@@ -163,12 +180,9 @@ ains %>% mutate_all( ~ replace_na(.,0)) %>%
   summarise_all(~ length(which(. != 0))) %>%
   pivot_longer(everything())
 # Diclofenac has only two values, those columns may be dropped
-ains %<>% dplyr::select(-matches("clofenac")) %>% 
-  mutate_at(vars(-c(ID:time)), ~ as.integer(.))
+
   
-ains %>% filter(time == "0") %>% 
-    mutate_all( ~ replace_na(.,0)) %>% 
-    summarise_if(is.numeric, ~ length(which(. != 0)))
+ains %>% mutate_all( ~ replace_na(.,0)) %>% summarise_if(is.numeric, ~ length(which(. != 0)))
 # only Metamizol was administered in AWR: 31 times
 
 
@@ -262,9 +276,9 @@ fluids_and_ponv <- spss_data %>%
 # ) %>% dplyr::select(ID:Vomex) %>% dplyr::select(-missing) %>% 
 
 
-r <- list(ains, dipidolor, fluids_and_ponv, scores)
-names(r) <- c("ains", "dipidolor", "fluids_and_ponv", "scores")
-rm(ains, dipidolor, fluids_and_ponv, scores)
+rawlist <- list(ains, dipidolor, fluids_and_ponv, scores, IID_measures)
+names(rawlist) <- c("ains", "dipidolor", "fluids", "scores", "IID")
+rm(ains, dipidolor, fluids_and_ponv, scores, IID_measures, spss_data)
 
 save.image(file = paste0(here("input"), "/TE_data.RData"))
 
