@@ -278,7 +278,18 @@ fluids_and_ponv <- spss_data %>%
 
 rawlong <- list(ains, dipidolor, fluids_and_ponv, scores, IID_measures)
 names(rawlong) <- c("ains", "dipidolor", "fluids", "scores", "IID")
-rm(ains, dipidolor, fluids_and_ponv, scores, IID_measures, spss_data)
+rm(ains, dipidolor, fluids_and_ponv, scores, IID_measures, spss_data, null_and_missing, select_cutoff)
+
+rawlong$ains$day %<>% as.integer() # small patch (ID, day are now as integer in all the rawlong)
+
+rawlong$ains_fluids <- full_join(rawlong$ains, rawlong$fluids, by = c("ID","day")) %>%   
+  mutate_at(vars(-ID, -day), ~ ifelse(. > 0, 1, 0)) %>% 
+  mutate(PONV = pmax(Erbrechen, Vomex, na.rm = TRUE)) %>% 
+  select(-matches("Total|Trink|Erbr|Vome")) 
+
+kuss_IDs <- rawlong$scores$KUSS$ID %>% unique()
+faces_IDs <- rawlong$scores$FACES$ID %>% unique()
+
 
 save.image(file = paste0(here("input"), "/TE_data.RData"))
 

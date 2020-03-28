@@ -23,16 +23,14 @@ clean.it <- function() {
 clean.it()
 
 
+
+
 # load data from "import_data.R"
 
 load(paste0(here("input"), "/TE_data.RData"))
 
 
-# the function that extracts the difference between "first" and "second" per day
 
-DiffAbs <- function(x) {
-  dplyr::first(x) - dplyr::last(x) 
-}
 
 # extract scores from r$scores and flatten the data with the first measure and the difference
 # the ppmd scores are not taken twice, this operation is not for ppmd
