@@ -1,56 +1,11 @@
 ###### head and functions ######
-clean.it <- function() {
-  basic.packages <- c("package:stats","package:graphics",
-                      "package:grDevices","package:utils",
-                      "package:datasets","package:methods",
-                      "package:base")
-  package.list <- dplyr::setdiff( search()[ifelse(unlist(gregexpr("package:",search()))==1,TRUE,FALSE)] , basic.packages)
-  if (length(package.list)>0)  for(package in package.list) detach(package, character.only=TRUE)
-  if(!require(pacman))install.packages("pacman"); require(here)
-  
-  pacman::p_load(here, VIM, janitor, missRanger,
-                 tidyverse,magrittr,purrr, hablar,
-                 DataExplorer)
-  
-  rm(list = dplyr::setdiff( ls(envir = globalenv()),
-                            c("clean.it")
-  ),
-  envir = globalenv())
-  #gc() # or sessionInfo()
-}
-clean.it()
 
-# custom min, max, and diff(range)
-min <- function(x) {
-  hablar::min_(x, ignore_na = TRUE)
-}
+source("functions.R")
+clean.it(); 
 
-max <- function(x) {
-  hablar::max_(x, ignore_na = TRUE)
-}
+pacman::p_load(here, tidyverse,magrittr,purrr, DataExplorer)
 
-range <- function(x) {
-  max(x) - min(x)
-}
 
-null_and_missing <- function(df) {
-  result <- map_df(df, ~ 100*sum(is.na(dplyr::na_if(.,0)))/nrow(df)) %>%
-    pivot_longer(everything()) %>% arrange(desc(value)) %>% 
-    transmute(name, procent_NA_and_0 = paste0(round(value,3), " %"))
-  return(result)
-}
-
-select_cutoff <- function(df, cutoff){ # cutoff between 0 and 1 (100%)
-  cols_to_keep <- filter(
-    pivot_longer(
-      map_df(df, ~ 100*sum(is.na(dplyr::na_if(.,0)))/nrow(df)),
-      everything()),
-    value < cutoff)$name
-  result <- dplyr::select(df, one_of(cols_to_keep))
-  return(result)
-}
-
-  
 # load data from "import_data.R"
 
 load(paste0(here("input"), "/TE_data.RData"))
@@ -211,8 +166,4 @@ select(
 ) %>% 
 select_cutoff(cutoff = 95) 
 
-
-
-
- 
   
