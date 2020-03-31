@@ -9,14 +9,19 @@ clean.it <- function() {
   if (length(package.list)>0)  for(package in package.list) detach(package, character.only=TRUE)
   if(!require(pacman))install.packages("pacman"); require(here)
   
+  path <- here("input")
+  
+  pacman::p_load(here,tidyverse,magrittr,purrr)
+  
   rm(list = dplyr::setdiff( ls(envir = globalenv()),
-                            c("clean.it")
+                            c("clean.it", "path")
   ),
   envir = globalenv())
   #gc() # or sessionInfo()
   
 }; clean.it()
-source("functions.R")
+
+#source("functions.R")
 pacman::p_load(here, tidyverse,magrittr,purrr, DataExplorer)
 
 
