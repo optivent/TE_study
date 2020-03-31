@@ -17,17 +17,17 @@ clean.it <- function() {
 }
 
 # custom min, max, and diff(range)
-min <- function(x) {
+min_na <- function(x) {
   library(hablar)
   hablar::min_(x, ignore_na = TRUE)
 }
 
-max <- function(x) {
+max_na <- function(x) {
   library(hablar)
   hablar::max_(x, ignore_na = TRUE)
 }
 
-range <- function(x) {
+range_na <- function(x) {
   max(x) - min(x)
 }
 
@@ -42,7 +42,7 @@ percent_na <- function(df) {
 }
 
 # this function shows the procent of missing or null values per column
-null_and_missing <- function(df) {
+null_na <- function(df) {
   result <- map_df(df, ~ 100*sum(is.na(dplyr::na_if(.,0)))/nrow(df)) %>%
     pivot_longer(everything()) %>% arrange(desc(value)) %>% 
     transmute(name, procent_NA_and_0 = paste0(round(value,3), " %"))
@@ -50,7 +50,7 @@ null_and_missing <- function(df) {
 }
 
 # this function removes the columns that are above a cuttoff percent of missing or null values (s. null_and_missing)
-select_cutoff <- function(df, cutoff){ # cutoff between 0 and 1 (100%)
+select_cols <- function(df, cutoff){ # cutoff between 0 and 1 (100%)
   cols_to_keep <- filter(
     pivot_longer(
       map_df(df, ~ 100*sum(is.na(dplyr::na_if(.,0)))/nrow(df)),
@@ -78,11 +78,11 @@ fn_flat2 <- function(df, firstlevel, secondlevel, cutoff){
         summarise_at(
           vars(-toString(secondlevel)),
           list(
-            ~ min(.),
+            ~ min_na(.),
             ~ median(.,na.rm = T),
-            ~ max(.),
+            ~ max_na(.),
             ~ sum(., na.rm = TRUE),
-            ~ range(.))
+            ~ range_na(.))
         ) %>% 
       ungroup(),
     by = toString(firstlevel) 
@@ -110,11 +110,11 @@ fn_flat3 <- function(df, firstlevel, secondlevel, thirdlevel, excludecol, cutoff
         summarise_at(
           vars(-c(!!secondlevel, !!thirdlevel )),
           list(
-            ~ min(.),
+            ~ min_na(.),
             ~ median(.,na.rm = TRUE),
-            ~ max(.),
+            ~ max_na(.),
             ~ sum(., na.rm = TRUE),
-            ~ range(.)
+            ~ range_na(.)
           )
         ) %>% 
       ungroup()
@@ -126,11 +126,11 @@ fn_flat3 <- function(df, firstlevel, secondlevel, thirdlevel, excludecol, cutoff
         summarise_at(
           vars(-!!thirdlevel),
           list(
-            ~ min(.),
+            ~ min_na(.),
             ~ median(.,na.rm = TRUE),
-            ~ max(.),
+            ~ max_na(.),
             ~ sum(., na.rm = TRUE),
-            ~ range(.)
+            ~ range_na(.)
           )
         ) %>% 
       ungroup() %>% 
@@ -149,25 +149,25 @@ fn_flat3 <- function(df, firstlevel, secondlevel, thirdlevel, excludecol, cutoff
 
 ############### Random_forest Functions ##################
 
-#library(mosaic)
-
-check_struct <- function(df){
-   suppressWarnings(
-     df <- df %>% purrr::map_dfr(suppressWarnings(mosaic::favstats)) %>%
-       cbind(names = names(df)) %>%
-       dplyr::select(names, everything()) %>%
-       mutate(NAs = 100*missing/nrow(df)) %>%
-       cbind(NA_NULL = map_dbl(df, ~ 100*sum(is.na(dplyr::na_if(.,0)))/nrow(df))) %>%
-       dplyr::select(-c(n, missing)) %>%
-       mutate_if(is.numeric, ~ round(., digits = 1)) %>% 
-       mutate(imp = as.integer((100-NA_NULL)*sd)) 
-   )
-   return(df)
- }
+# library(mosaic)
+# check_struct <- function(df){
+#    suppressWarnings(
+#      df <- df %>% purrr::map_dfr(suppressWarnings(mosaic::favstats)) %>%
+#        cbind(names = names(df)) %>%
+#        dplyr::select(names, everything()) %>%
+#        mutate(NAs = 100*missing/nrow(df)) %>%
+#        cbind(NA_NULL = map_dbl(df, ~ 100*sum(is.na(dplyr::na_if(.,0)))/nrow(df))) %>%
+#        dplyr::select(-c(n, missing)) %>%
+#        mutate_if(is.numeric, ~ round(., digits = 1)) %>% 
+#        mutate(imp = as.integer((100-NA_NULL)*sd)) 
+#    )
+#    return(df)
+#  }
 
 
 impute_RF <- function(df) {
-  require(missRanger)
+  if (!require(ranger)) install.packages("ranger")
+  library(ranger)
   df %>% missRanger::missRanger(
     num.trees = 1000, maxiter = 100, pmm.k = 3)
 }
@@ -177,12 +177,10 @@ library(tidyverse)
 library(Boruta)
 library(furrr)
 
-scale01 <- function(x, ...){(x - min(x, ...)) / (max(x, ...) - min(x, ...))} # ... allows "na.rm = TRUE"
+scale01 <- function(x, ...){(x - base::min(x, ...)) / (base::max(x, ...) - base::min(x, ...))} # ... allows "na.rm = TRUE"
 
 corr_RF <- function(df, iter){
-  set.seed(111)
-  plan(multiprocess)
-    
+
     result <- df %>% names() %>% 
       future_map_dfr(
         ~ attStats(
@@ -192,33 +190,75 @@ corr_RF <- function(df, iter){
             ),
             data = df,
             mcAdj = TRUE, doTrace = 0, holdHistory = TRUE, 
-            pValue = 0.01,
+            pValue = min(c(1/(ncol(df)*nrow(df)), 0.01)),
             maxRuns = iter
           )
-        ) %>% 
-          rownames_to_column() %>% 
-          mutate(
-            Score = ifelse(decision == "Rejected", 0, 
-                           scale01(medianImp * normHits, na.rm = TRUE)),
-            Score = na_if(Score, 1)) %>%
-          dplyr::select(rowname, Score) %>% 
-          pivot_wider(names_from = rowname, values_from = Score),
-        .progress = TRUE
-      ) %>% mutate(target = colnames(test)) %>% column_to_rownames(var = "target") %>% 
-      na_if(0) 
+        ), .progress = TRUE
+      )
 
   return(result)
 }
 
-matrix_RF <- function(df, sensibility, clusters){
-  full_join(enframe(colMeans(df, na.rm = TRUE)) %>% rename(feature_wise = value),
-            enframe(rowMeans(df, na.rm = TRUE)) %>% transmute(predictor_wise = value, name = colnames(df))
-  ) %>% mutate(product = feature_wise*predictor_wise) %>% 
-    top_frac(sensibility, product) %>% pull(name) -> selection
+reduce_RF <- function(df, sens){
   
-  subset(df, rownames(df) %in% selection) %>% subset(select = selection) %>% 
-    pheatmap::pheatmap(display_numbers = TRUE, cutree_rows = clust, cutree_cols = clust)
+selection <- full_join(
+    enframe(colMeans(df, na.rm = TRUE)) %>% rename(feature_wise = value),
+    enframe(rowMeans(df, na.rm = TRUE)) %>% transmute(predictor_wise = value, name = colnames(df)),
+    by = "name"
+  ) %>%
+  mutate(product = feature_wise*predictor_wise) %>% 
+  top_frac(sens, product) %>% pull(name)
+
+  
+  df <- mutate(df, target = names(df)) %>% 
+  column_to_rownames(var = "target") %>%
+  select(one_of(selection)) %>% 
+  rownames_to_column(var = "target") %>% 
+  filter(target %in% selection)
+  
+  return(df)
 }
+
+
+  
+
+####################
+
+corr_RF <- function(df, iterations) {
+  set.seed(111)
+  
+  if (!require(pacman)) install.packages("pacman")
+  pacman::p_load(tidyverse, furrr, Boruta)
+  plan(multiprocess)  
+  
+  suppressWarnings(
+        names(df) %>% 
+      future_map_dfr(
+        ~ attStats(
+          Boruta::Boruta(
+            formula(
+              paste0('`', ., '` ~ ', paste(names(df), collapse = " + "))
+            ),
+            data = na.omit(df),
+            mcAdj = TRUE, doTrace = 0, holdHistory = TRUE, 
+            pValue = base::min(c(1/(ncol(df)*nrow(df)), 0.01)),
+            maxRuns = iterations
+          )
+        ) %>%
+          rownames_to_column() %>% 
+          mutate(Score = ifelse(decision == "Rejected", 0, medianImp*normHits)) %>%
+          mutate_at(vars(Score), ~ (. - base::min(.,na.rm = TRUE)) / 
+                      (base::max(., na.rm = TRUE) - base::min(., na.rm = TRUE))) %>% 
+          mutate(Score = dplyr::na_if(Score, 1)) %>%
+          dplyr::select(rowname, Score) %>% 
+          pivot_wider(names_from = rowname, values_from = Score),
+        .progress = TRUE
+      ) 
+  )
+}
+
+
+  
 
 
 
