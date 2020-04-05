@@ -44,8 +44,13 @@ select_cutoff <- function(df, cutoff){
 spss_data <- read_sav("input/Datensatz_TO_TE_komplett_neu_n158.sav") %>% 
                     as_tibble() %>% 
                     janitor::clean_names() %>% 
-                    rename(Age_in_months = alter_monate, Gender = geschlecht, Weight = gewicht, ID = nr) 
-  
+                    rename(Age_in_months = alter_monate,
+                           Gender = geschlecht,
+                           Weight = gewicht) %>% 
+                    mutate(ID = paste(as.character(pseudonym), as.character(datum), sep = "::")) %>% 
+                    dplyr::select(ID, everything()) %>% 
+                    dplyr::select(-datum, -pseudonym, -nr)
+                    
 colnames(spss_data) <- colnames(spss_data) %>% str_replace("x", "") %>% str_to_sentence() %>% str_replace("Id","ID")
 
 
@@ -87,8 +92,7 @@ dipidolor <- spss_data %>%
   select_all(~str_replace_all(., "tag_mi", "1")) %>%
   select_all(~str_replace_all(., "tag_a", "2")) %>% 
   select_all(~str_replace_all(., "__", "_")) %>% 
-  dplyr::rename('2_0_gabe_ja_nein' = '2_0_') %>% 
-  mutate(ID = as.integer(ID))
+  dplyr::rename('2_0_gabe_ja_nein' = '2_0_') 
 
 # the data is too large for efficient manipulation: there are two datasets: 
 # dipidolor_quantitative is on ID, day, time, first_second taken from the "mg" data
@@ -103,7 +107,7 @@ dipidolor_quantitative <- dipidolor %>% dplyr::select(matches("ID|mg")) %>%
   left_join(
     IID_measures %>% select(ID, Weight) # divided by KG
   )  %>% 
-  mutate(Dipi_µgperKg = as.integer(1000*Dipi_quant/Weight), ID = as.integer(ID)) %>% 
+  mutate(Dipi_µgperKg = as.integer(1000*Dipi_quant/Weight)) %>% 
   select(-c(Dipi_quant,Weight))
 
 
@@ -163,7 +167,6 @@ ains <- spss_data %>%
   select_all(~str_replace_all(., "Awr", "0_0")) %>% 
   select_all(~str_replace_all(., "tag", "X")) %>% 
   pivot_longer(-ID, values_to = "AINS_mg") %>% 
-  mutate(ID = as.integer(ID)) %>% 
   left_join( IID_measures %>% select(ID, Weight) ) %>% 
   transmute(ID, name, AINS_mgperkg = as.integer(AINS_mg/Weight)) %>% # the drugs are in mg/Kg body weight
   separate(name, c("day","time","AINS")) %>% 
@@ -220,7 +223,10 @@ scores <- scores %>%
     mutate(category = ifelse(kuss > faces, "KUSS", "FACES")) %>% select(-c(kuss:faces)) %>% 
     full_join(scores) %>% # here the join with the data itself
   ungroup() %>% 
-  pivot_wider(id_cols = c(ID, category, day, time), names_from = first_second, values_from = c(kuss, faces, ppmd)) %>% 
+  pivot_wider(
+    id_cols = c(ID, category, day, time),
+    names_from = first_second,
+    values_from = c(kuss, faces, ppmd)) %>% 
   rowwise() %>% 
     transmute(ID, day, time, category, 
             kuss_first, kuss_second, kuss_diff = -1* hablar::sum_(c(kuss_first, -1 * kuss_second), ignore_na = FALSE),
@@ -233,7 +239,6 @@ scores <- scores %>%
         select( -category ) %>% 
         select_if(~sum(!is.na(.)) > 10) %>% # drop the non-populated columns
         select(-matches("second")) %>% 
-        mutate_all( ~ as.integer(.)) %>% 
         select_all(~str_replace_all(., "_first", "")) %>% 
         select_all(~str_replace_all(., "_diff", "_repeat")) 
       ) 
@@ -252,17 +257,15 @@ fluids_and_ponv <- spss_data %>%
   rename('0_Vomex' = 'Vomex_', '2_Vomex' = 'Vomex_2', '1_Vomex' = 'Vomex_1',
          '0_trinkmenge' = '0_trinkmennge', 
          '0_Erbrechen' = 'Erbrechen_op', '1_Erbrechen' = 'Erbrechen_1', '2_Erbrechen' = 'Erbrechen_2_uhrzeit') %>% 
-  mutate_all(~as.integer(.)) %>% 
+  mutate_if(is.numeric, ~as.integer(.)) %>% 
   pivot_longer(-ID) %>% 
   separate(name, c("day", "category"), remove = TRUE) %>% 
   pivot_wider(id_cols = c(ID, day), names_from = category, values_from = value) %>% 
   mutate_at(vars(Erbrechen, Vomex), ~ tidyr::replace_na(.,0)) %>%  # another small "imputation" %>% 
-  mutate_all(~as.integer(.)) %>% 
   left_join(IID_measures %>% select(ID, Weight)) %>% 
   transmute(ID, day,
             Trinkmenge = trinkmenge/Weight, Infusion = infusion/Weight, TotalFluids = Trinkmenge + Infusion,
-            Erbrechen, Vomex) %>% 
-  mutate_all(~as.integer(.)) 
+            Erbrechen, Vomex)
   
 
 # original_colnames <- colnames(fluids_and_ponv)
@@ -276,20 +279,189 @@ fluids_and_ponv <- spss_data %>%
 # ) %>% dplyr::select(ID:Vomex) %>% dplyr::select(-missing) %>% 
 
 
-rawlong <- list(ains, dipidolor, fluids_and_ponv, scores, IID_measures)
-names(rawlong) <- c("ains", "dipidolor", "fluids", "scores", "IID")
-rm(ains, dipidolor, fluids_and_ponv, scores, IID_measures, spss_data, null_and_missing, select_cutoff)
+TE2 <- list(ains, dipidolor, fluids_and_ponv, scores, IID_measures)
+names(TE2) <- c("ains", "dipidolor", "fluids", "scores", "IID")
+rm(ains, dipidolor, fluids_and_ponv, scores, IID_measures, spss_data)
 
-rawlong$ains$day %<>% as.integer() # small patch (ID, day are now as integer in all the rawlong)
+TE2$ains$day %<>% as.integer() # small patch (ID, day are now as integer in all the rawlong)
 
-rawlong$ains_fluids <- full_join(rawlong$ains, rawlong$fluids, by = c("ID","day")) %>%   
+TE2$ains_fluids <- full_join(rawlong$ains, rawlong$fluids, by = c("ID","day")) %>%   
   mutate_at(vars(-ID, -day), ~ ifelse(. > 0, 1, 0)) %>% 
   mutate(PONV = pmax(Erbrechen, Vomex, na.rm = TRUE)) %>% 
   select(-matches("Total|Trink|Erbr|Vome")) 
 
-kuss_IDs <- rawlong$scores$KUSS$ID %>% unique()
-faces_IDs <- rawlong$scores$FACES$ID %>% unique()
+kuss_IDs <-TE2$scores$KUSS$ID %>% unique()
+faces_IDs <- TE2$scores$FACES$ID %>% unique()
+
+save.image(file = paste0(here("input"), "/TE_2_data.RData"))
 
 
-save.image(file = paste0(here("input"), "/TE_data.RData"))
+########### longitudinal data from FACES, KUSS, PPMD ############
+clean.it()
+Sys.setenv(LANG = "en")
+library(readxl)
+library(janitor)
+
+path <- here("input/Rohdaten pro Patient")
+
+longitudinal <- list.files(here("input/Rohdaten pro Patient"), pattern = ".xlsx") %>% 
+  map_dfr(~  readxl::read_xlsx(
+    path = paste0(path, "/", .x),
+    range = cell_cols("A:Z"),
+    col_types = "text"
+  ) %>% 
+    rename(realID = reaI_ID, pseudoID = Pseudo) %>% janitor::clean_names() %>% 
+    mutate_at(vars(p1:interv), ~ replace_na(.,0)) %>% # no entry represents 0
+    mutate_at(vars(p1:interv), ~ dplyr::na_if(.,"N")) %>% # N represents NA
+    mutate_at(vars(p1:interv),  ~ as.integer(.)) %>% 
+    mutate(total_of_cols= select(., p1:interv) %>% rowSums(na.rm = TRUE)) %>% 
+    filter(total_of_cols > 0) %>% select(- total_of_cols) %>% 
+    tidyr::fill(pseudo_id, .direction = "downup") %>% 
+    tidyr::fill(real_id, .direction = "downup") 
+  ) %>% 
+  mutate(
+    time = str_remove(time, "[D]"),
+    time = str_replace(time, "postOP", "01"),
+    day = as.integer(substr(time, start = 1, stop = 1)),
+    time = as.integer(substr(time, start = 2, stop = 2)),
+    time_axis = as.integer((day*3) + time)
+  ) %>% dplyr::select(matches("id"), day, time, time_axis, everything()) %>% 
+  filter(time_axis <= 14) %>%  # only 4 interventions 4/241 1,6% are after time_axis 15
+  mutate_at(vars(time_axis:interv), ~ as.integer(.)) %>% 
+  mutate_at(vars(p1:p15), ~ ifelse(. > 0, 1, .)) %>% 
+  mutate(total_of_cols= select(., p1:interv) %>% rowSums(na.rm = TRUE)) %>% 
+  filter(total_of_cols > 0) %>% select(- total_of_cols) %>% # observ. with all-zeros are dropped
+  distinct() %>% 
+  rowwise() %>% 
+  mutate(
+    ppmd = hablar::sum_(c(p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15),ignore_na = TRUE),
+    kuss_sum = hablar::sum_(c(w,g,r,b,m), ignore_na = TRUE),
+    weighted_score = hablar::sum_( c(kuss, faces, as.integer(ppmd*2/3)) , ignore_na = TRUE )    
+  ) %>% 
+  mutate_at(vars(ppmd), ~ ifelse(time_axis == 1, NA, .)) %>% 
+  ungroup() %>% 
+  mutate_at(vars(day:weighted_score), ~ as.integer(.))
+
+
+to_drop <- filter(longitudinal, weighted_score == 0 & interv == 1) %>% # drop obs with sum of scores zero and intervention
+  bind_rows( filter(longitudinal, is.na(kuss) & is.na(faces) & is.na(ppmd)) ) 
+
+longitudinal <- anti_join(longitudinal, to_drop) 
+
+rm(path, to_drop)
+
+count(longitudinal, interv) # 222 Dipidolor interventions
+
+longitudinal %>% filter(interv == 1) %>% count(time_axis)
+
+longitudinal %>% 
+  group_by(real_id) %>% 
+  summarise(nr_pseudo_id = length(unique(pseudo_id))) %>%
+  arrange(desc(nr_pseudo_id)) %>% 
+  ungroup() # pseudo_id is a better identifier, real_id is NA in 27 cases
+
+longitudinal %>% map(~ head(unique(.x)))
+
+count_scores <- list()
+
+no_interv <- longitudinal %>% filter(interv == 0) %>% 
+  select(kuss, faces) %>% 
+  mutate_all( ~ as.numeric(.)) %>% 
+  map(~count(data.frame(x=.x), x) %>% na.omit)
+with_interv <- longitudinal %>% filter(interv == 1) %>% 
+  select(kuss, faces) %>% 
+  mutate_all( ~ as.numeric(.)) %>% 
+  map(~count(data.frame(x=.x), x) %>% na.omit())
+
+count_scores$kuss <- no_interv$kuss %>% rename(without_interv = n) %>%
+  full_join(rename(with_interv$kuss, with_interv = n)) %>% 
+  rename(kuss = x) %>% 
+  mutate_at(vars(without_interv, with_interv),
+            ~ tidyr::replace_na(.,0) * 100/sum(., na.rm = TRUE)
+  ) 
+
+count_scores$faces <- no_interv$faces %>% rename(without_interv = n) %>%
+  full_join(rename(with_interv$faces, with_interv = n)) %>% 
+  rename(faces = x) %>% 
+  mutate_at(vars(without_interv, with_interv),
+            ~ tidyr::replace_na(.,0) * 100/sum(., na.rm = TRUE)
+  ) 
+
+rm(no_interv, with_interv)
+
+count_scores$ppmd <- longitudinal %>% 
+  filter(time_axis > 1 & interv == 0) %>% count(ppmd) %>%
+  rename(without_interv = n) %>% na.omit() %>% 
+  left_join(
+    longitudinal %>% 
+      filter(time_axis > 1 & interv == 1) %>% count(ppmd) %>% 
+      rename(with_interv = n) %>% na.omit()
+  ) %>% 
+  mutate_at(vars(without_interv, with_interv),
+            ~ tidyr::replace_na(.,0) * 100/sum(., na.rm = TRUE)
+  ) 
+
+count_scores %>% map(~ mutate_all(.x, ~ as.integer(.))) # the procents per each scale
+
+# interventions and faces, 128 children
+
+
+contrast <- longitudinal %>% select(faces, kuss, ppmd) %>%
+  map(~ tibble(pseudo_id = longitudinal$pseudo_id,
+               scale = .x,
+               interv = longitudinal$interv) %>% 
+        na.omit() %>% 
+        group_by(pseudo_id) %>% 
+        summarise(levels_interv = n_distinct(interv)) %>% 
+        ungroup %>% 
+        filter(levels_interv == 2) 
+  ) %>% 
+  map(~ .x %>% left_join(longitudinal) %>% 
+        dplyr::select(pseudo_id, time_axis, faces, kuss, ppmd, interv) %>% 
+        mutate_at(vars(-pseudo_id), ~ as.integer(.)) %>% distinct() 
+  ) 
+
+contrast$faces %<>% drop_na(faces) %>% 
+  group_split(pseudo_id, interv) %>% 
+  map_dfr(~ .x %>% 
+            summarise(
+              pseudo_id = first(pseudo_id),
+              min = min(faces),
+              med = median(faces),
+              max = max(faces), 
+              interv = first(interv), 
+            ) %>% mutate_at(vars(-pseudo_id), ~ as.integer(.))
+  )
+  
+  
+contrast$kuss %<>% drop_na(kuss) %>% 
+  group_split(pseudo_id, interv) %>% 
+  map_dfr(~ .x %>% 
+            summarise(
+              pseudo_id = first(pseudo_id),
+              min = min(kuss),
+              med = median(kuss),
+              max = max(kuss), 
+              interv = first(interv), 
+            ) %>% mutate_at(vars(-pseudo_id), ~ as.integer(.))
+  )
+
+
+contrast$ppmd %<>% drop_na(ppmd) %>% 
+  group_split(pseudo_id, interv) %>% 
+  map_dfr(~ .x %>% 
+            summarise(
+              pseudo_id = first(pseudo_id),
+              min = min(ppmd),
+              med = median(ppmd),
+              max = max(ppmd), 
+              interv = first(interv), 
+            ) %>% mutate_at(vars(-pseudo_id), ~ as.integer(.))
+  )
+  
+
+
+
+
+  
 
