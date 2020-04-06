@@ -437,5 +437,15 @@ m <- glmer(intervention ~ scale + (1 | pseudo_id),
            data = contrast$faces)
 lmer(formula = intervention ~ scale + (1|pseudo_id),
      data = contrast$faces) %>% broom::tidy()
-  
 
+####### some test with count data #####
+  
+library(MASS)
+data("menarche")
+menarche <- menarche %>% dplyr::mutate(Non_Menarche = Total - Menarche)
+glm.out = glm(cbind(Menarche, Non_Menarche) ~ Age,
+              family=binomial(logit), data=menarche)  
+
+plot(Menarche/Total ~ Age, data = menarche)
+lines(menarche$Age, glm.out$fitted, type="l", col="red")
+title(main="Menarche Data with Fitted Logistic Regression Line")
