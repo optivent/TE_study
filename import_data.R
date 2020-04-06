@@ -350,17 +350,17 @@ longitudinal <- anti_join(longitudinal, to_drop)
 
 rm(path, to_drop)
 
-count(longitudinal, interv) # 222 Dipidolor interventions
+#count(longitudinal, interv) # 222 Dipidolor interventions
 
-longitudinal %>% filter(interv == 1) %>% count(time_axis)
+#longitudinal %>% filter(interv == 1) %>% count(time_axis)
 
-longitudinal %>% 
-  group_by(real_id) %>% 
-  summarise(nr_pseudo_id = length(unique(pseudo_id))) %>%
-  arrange(desc(nr_pseudo_id)) %>% 
-  ungroup() # pseudo_id is a better identifier, real_id is NA in 27 cases
+# longitudinal %>% 
+#   group_by(real_id) %>% 
+#   summarise(nr_pseudo_id = length(unique(pseudo_id))) %>%
+#   arrange(desc(nr_pseudo_id)) %>% 
+#   ungroup() # pseudo_id is a better identifier, real_id is NA in 27 cases
 
-longitudinal %>% map(~ head(unique(.x)))
+#longitudinal %>% map(~ head(unique(.x)))
 
 count_scores <- list()
 
@@ -405,63 +405,37 @@ count_scores %>% map(~ mutate_all(.x, ~ as.integer(.))) # the procents per each 
 
 # interventions and faces, 128 children
 
-
-contrast <- longitudinal %>% select(faces, kuss, ppmd) %>%
-  map(~ tibble(pseudo_id = longitudinal$pseudo_id,
-               scale = .x,
-               interv = longitudinal$interv) %>% 
+custom_sum <- function(df, col){
+  col <- enexpr(col)
+  df <- longitudinal %>% select(pseudo_id, !!col, interv) %>% 
         na.omit() %>% 
         group_by(pseudo_id) %>% 
-        summarise(levels_interv = n_distinct(interv)) %>% 
-        ungroup %>% 
-        filter(levels_interv == 2) 
-  ) %>% 
-  map(~ .x %>% left_join(longitudinal) %>% 
-        dplyr::select(pseudo_id, time_axis, faces, kuss, ppmd, interv) %>% 
-        mutate_at(vars(-pseudo_id), ~ as.integer(.)) %>% distinct() 
-  ) 
+          summarise(level_interv = n_distinct(interv)) %>% 
+        ungroup() %>% filter(level_interv == 2) %>% 
+        left_join(longitudinal) %>% 
+        select(pseudo_id, !!col, interv) %>% 
+        group_by(pseudo_id, interv) %>% 
+          summarise(min = min(!!col, na.rm = TRUE), max = max(!!col, na.rm = TRUE)) %>% 
+        ungroup() %>% 
+        pivot_wider(id_cols = pseudo_id, names_from = interv, values_from = c(min,max)) %>% 
+        select(pseudo_id, max_0, min_1) %>% 
+        pivot_longer(-pseudo_id, names_to = "intervention", values_to = "scale") %>% 
+        mutate(intervention = ifelse(intervention == "max_0", 0, 1)) 
+  return(df)
+}
 
-contrast$faces %<>% drop_na(faces) %>% 
-  group_split(pseudo_id, interv) %>% 
-  map_dfr(~ .x %>% 
-            summarise(
-              pseudo_id = first(pseudo_id),
-              min = min(faces),
-              med = median(faces),
-              max = max(faces), 
-              interv = first(interv), 
-            ) %>% mutate_at(vars(-pseudo_id), ~ as.integer(.))
-  )
-  
-  
-contrast$kuss %<>% drop_na(kuss) %>% 
-  group_split(pseudo_id, interv) %>% 
-  map_dfr(~ .x %>% 
-            summarise(
-              pseudo_id = first(pseudo_id),
-              min = min(kuss),
-              med = median(kuss),
-              max = max(kuss), 
-              interv = first(interv), 
-            ) %>% mutate_at(vars(-pseudo_id), ~ as.integer(.))
-  )
+contrast <- list()
+contrast$faces <- custom_sum(longitudinal, col = faces) 
+contrast$kuss <- custom_sum(longitudinal, col = kuss)
+contrast$ppmd <- custom_sum(longitudinal, col = ppmd)
+rm(custom_sum)
 
 
-contrast$ppmd %<>% drop_na(ppmd) %>% 
-  group_split(pseudo_id, interv) %>% 
-  map_dfr(~ .x %>% 
-            summarise(
-              pseudo_id = first(pseudo_id),
-              min = min(ppmd),
-              med = median(ppmd),
-              max = max(ppmd), 
-              interv = first(interv), 
-            ) %>% mutate_at(vars(-pseudo_id), ~ as.integer(.))
-  )
-  
+library(lme4)
 
-
-
-
+m <- glmer(intervention ~ scale + (1 | pseudo_id),
+           data = contrast$faces)
+lmer(formula = intervention ~ scale + (1|pseudo_id),
+     data = contrast$faces) %>% broom::tidy()
   
 
