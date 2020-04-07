@@ -299,4 +299,174 @@ save.image(file = paste0(here("input"), "/TE_2_data.RData"))
 
 ########### longitudinal data from FACES, KUSS, PPMD ############
 
+clean.it()
+Sys.setenv(LANG = "en")
+library(readxl)
+library(janitor)
+
+path <- here("input/Rohdaten pro Patient")
+
+longitudinal <- list.files(here("input/Rohdaten pro Patient"), pattern = ".xlsx") %>% 
+  map_dfr(~  readxl::read_xlsx(
+    path = paste0(path, "/", .x),
+    range = cell_cols("A:Z"),
+    col_types = "text"
+  ) %>% 
+    rename(realID = reaI_ID, pseudoID = Pseudo) %>% janitor::clean_names() %>% 
+    mutate_at(vars(p1:interv), ~ replace_na(.,0)) %>% # no entry represents 0
+    mutate_at(vars(p1:interv), ~ dplyr::na_if(.,"N")) %>% # N represents NA
+    mutate_at(vars(p1:interv),  ~ as.integer(.)) %>% 
+    mutate(total_of_cols= select(., p1:interv) %>% rowSums(na.rm = TRUE)) %>% 
+    filter(total_of_cols > 0) %>% select(- total_of_cols) %>% 
+    tidyr::fill(pseudo_id, .direction = "downup") %>% 
+    tidyr::fill(real_id, .direction = "downup") 
+  ) %>% 
+  mutate(
+    time = str_remove(time, "[D]"),
+    time = str_replace(time, "postOP", "01"),
+    day = as.integer(substr(time, start = 1, stop = 1)),
+    time = as.integer(substr(time, start = 2, stop = 2)),
+    time_axis = as.integer((day*3) + time)
+  ) %>% dplyr::select(matches("id"), day, time, time_axis, everything()) %>% 
+  filter(time_axis <= 14) %>%  # only 4 interventions 4/241 1,6% are after time_axis 15
+  mutate_at(vars(time_axis:interv), ~ as.integer(.)) %>% 
+  mutate_at(vars(p1:p15), ~ ifelse(. > 0, 1, .)) %>% 
+  mutate(total_of_cols= select(., p1:interv) %>% rowSums(na.rm = TRUE)) %>% 
+  filter(total_of_cols > 0) %>% select(- total_of_cols) %>% # observ. with all-zeros are dropped
+  distinct() %>% 
+  rowwise() %>% 
+  mutate(
+    ppmd = hablar::sum_(c(p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15),ignore_na = TRUE),
+    kuss_sum = hablar::sum_(c(w,g,r,b,m), ignore_na = TRUE),
+    weighted_score = hablar::sum_( c(kuss, faces, as.integer(ppmd*2/3)) , ignore_na = TRUE )    
+  ) %>% 
+  mutate_at(vars(ppmd), ~ ifelse(time_axis == 1, NA, .)) %>% 
+  ungroup() %>% 
+  mutate_at(vars(day:weighted_score), ~ as.integer(.))
+
+
+to_drop <- filter(longitudinal, weighted_score == 0 & interv == 1) %>% # drop obs with sum of scores zero and intervention
+  bind_rows( filter(longitudinal, is.na(kuss) & is.na(faces) & is.na(ppmd)) ) 
+
+longitudinal <- anti_join(longitudinal, to_drop) 
+
+rm(path, to_drop)
+
+#count(longitudinal, interv) # 222 Dipidolor interventions
+
+#longitudinal %>% filter(interv == 1) %>% count(time_axis)
+
+# longitudinal %>% 
+#   group_by(real_id) %>% 
+#   summarise(nr_pseudo_id = length(unique(pseudo_id))) %>%
+#   arrange(desc(nr_pseudo_id)) %>% 
+#   ungroup() # pseudo_id is a better identifier, real_id is NA in 27 cases
+
+#longitudinal %>% map(~ head(unique(.x)))
+
+count_scores <- list()
+
+no_interv <- longitudinal %>% filter(interv == 0) %>% 
+  select(kuss, faces) %>% 
+  mutate_all( ~ as.numeric(.)) %>% 
+  map(~count(data.frame(x=.x), x) %>% na.omit)
+with_interv <- longitudinal %>% filter(interv == 1) %>% 
+  select(kuss, faces) %>% 
+  mutate_all( ~ as.numeric(.)) %>% 
+  map(~count(data.frame(x=.x), x) %>% na.omit())
+
+count_scores$kuss <- no_interv$kuss %>% rename(without_interv = n) %>%
+  full_join(rename(with_interv$kuss, with_interv = n)) %>% 
+  rename(kuss = x) %>% 
+  mutate_at(vars(without_interv, with_interv),
+            ~ tidyr::replace_na(.,0) * 100/sum(., na.rm = TRUE)
+  ) 
+
+count_scores$faces <- no_interv$faces %>% rename(without_interv = n) %>%
+  full_join(rename(with_interv$faces, with_interv = n)) %>% 
+  rename(faces = x) %>% 
+  mutate_at(vars(without_interv, with_interv),
+            ~ tidyr::replace_na(.,0) * 100/sum(., na.rm = TRUE)
+  ) 
+
+rm(no_interv, with_interv)
+
+count_scores$ppmd <- longitudinal %>% 
+  filter(time_axis > 1 & interv == 0) %>% count(ppmd) %>%
+  rename(without_interv = n) %>% na.omit() %>% 
+  left_join(
+    longitudinal %>% 
+      filter(time_axis > 1 & interv == 1) %>% count(ppmd) %>% 
+      rename(with_interv = n) %>% na.omit()
+  ) %>% 
+  mutate_at(vars(without_interv, with_interv),
+            ~ tidyr::replace_na(.,0) * 100/sum(., na.rm = TRUE)
+  ) 
+
+
+count_scores %>%
+  map(~ .x %>% mutate_all(~ as.integer(.))) %>% 
+  map(~ .x %>% rename(scale_value = 1)) %>% 
+  map_dfr(~ .x %>% 
+            pivot_longer(-scale_value,
+                         names_to = "intervention",
+                         values_to = "count") %>% 
+            arrange(intervention),
+          .id = "scale") %>% View()
+mutate(expanded = rep()) 
+
+
+
+# interventions and faces, 128 children
+
+custom_sum <- function(df, col){
+  col <- enexpr(col)
+  df <- longitudinal %>% select(pseudo_id, !!col, interv) %>% 
+    na.omit() %>% 
+    group_by(pseudo_id) %>% 
+    summarise(level_interv = n_distinct(interv)) %>% 
+    ungroup() %>% filter(level_interv == 2) %>% 
+    left_join(longitudinal) %>% 
+    select(pseudo_id, !!col, interv) %>% 
+    group_by(pseudo_id, interv) %>% 
+    summarise(min = min(!!col, na.rm = TRUE), max = max(!!col, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    pivot_wider(id_cols = pseudo_id, names_from = interv, values_from = c(min,max)) %>% 
+    select(pseudo_id, max_0, min_1) %>% 
+    pivot_longer(-pseudo_id, names_to = "intervention", values_to = "value") %>% 
+    mutate(intervention = ifelse(intervention == "max_0", 0, 1)) 
+  return(df)
+}
+
+contrast <- list()
+contrast$faces <- custom_sum(longitudinal, col = faces) 
+contrast$kuss <- custom_sum(longitudinal, col = kuss)
+contrast$ppmd <- custom_sum(longitudinal, col = ppmd)
+contrast <- contrast %>% map_dfr(~ .x, .id = "scale")
+rm(custom_sum)
+
+library(lme4)
+library(broom)
+
+contrast %>% group_split(scale) %>% 
+  map( ~ glm(intervention ~ value, family = "binomial", data = .x)) %>% 
+  map_df(broom::tidy, .id = "binomial")
+
+contrast %>% group_by(scale, pseudo_id) %>%
+  summarise(delta_value = dplyr::last(value)-dplyr::first(value)) %>% 
+  split(.$scale) %>%
+  map(~ .x$delta_value %>% summary() %>% broom::tidy())
+
+contrast %>% pivot_wider(id_cols = c(scale,pseudo_id),
+                         names_from = intervention,
+                         values_from = value) %>% 
+  rename(no_interv = `0`, interv = `1`) %>% 
+  mutate()
+
+
+
+
+
+
+
 
