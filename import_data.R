@@ -403,7 +403,7 @@ count_scores$ppmd <- longitudinal %>%
             ~ tidyr::replace_na(.,0) * 100/sum(., na.rm = TRUE)
   ) 
 
-
+# count_scores on IID data
 count_scores %>%
   map(~ .x %>% mutate_all(~ as.integer(.))) %>% 
   map(~ .x %>% rename(scale_value = 1)) %>% 
@@ -412,58 +412,54 @@ count_scores %>%
                          names_to = "intervention",
                          values_to = "count") %>% 
             arrange(intervention),
-          .id = "scale") %>% View()
-mutate(expanded = rep()) 
+          .id = "scale") 
 
 
 
-# interventions and faces, 128 children
-
+# from same children (scales) with/without intervention
 custom_sum <- function(df, col){
   col <- enexpr(col)
   df <- longitudinal %>% select(pseudo_id, !!col, interv) %>% 
     na.omit() %>% 
     group_by(pseudo_id) %>% 
-    summarise(level_interv = n_distinct(interv)) %>% 
-    ungroup() %>% filter(level_interv == 2) %>% 
-    left_join(longitudinal) %>% 
+      summarise(level_interv = n_distinct(interv)) %>% 
+    ungroup() %>%
+    filter(level_interv == 2) %>% 
+  left_join(longitudinal) %>% 
     select(pseudo_id, !!col, interv) %>% 
     group_by(pseudo_id, interv) %>% 
-    summarise(min = min(!!col, na.rm = TRUE), max = max(!!col, na.rm = TRUE)) %>% 
-    ungroup() %>% 
-    pivot_wider(id_cols = pseudo_id, names_from = interv, values_from = c(min,max)) %>% 
-    select(pseudo_id, max_0, min_1) %>% 
-    pivot_longer(-pseudo_id, names_to = "intervention", values_to = "value") %>% 
-    mutate(intervention = ifelse(intervention == "max_0", 0, 1)) 
+      summarise(min = min(!!col, na.rm = TRUE),
+                med = as.integer(median(!!col, na.rm = TRUE)),
+                max = max(!!col, na.rm = TRUE)
+      ) %>% 
+    ungroup()
   return(df)
 }
 
+library(skimr)
 contrast <- list()
 contrast$faces <- custom_sum(longitudinal, col = faces) 
 contrast$kuss <- custom_sum(longitudinal, col = kuss)
 contrast$ppmd <- custom_sum(longitudinal, col = ppmd)
-contrast <- contrast %>% map_dfr(~ .x, .id = "scale")
-rm(custom_sum)
+contrast %>% map_dfr(~ .x, .id = "scale") %>% 
+  group_by(scale, pseudo_id) %>% 
+  summarise_at(vars(min:max), ~ (dplyr::last(.) - dplyr::first(.))) %>% ungroup() %>% 
+  rename_if(is.numeric, ~ paste0(., "_diff")) %>% 
+  split(.$scale) %>% 
+  map_dfr(~ .x %>% dplyr::select(matches("diff")) %>% 
+        skimr::skim() %>% as_tibble %>% rename(variable = skim_variable) %>% 
+          select(variable, numeric.p25:numeric.p75),
+        .id = "scale") %>% 
+  split(.$scale)
+  
+    
 
 library(lme4)
 library(broom)
 
-contrast %>% group_split(scale) %>% 
+contrast %>%
   map( ~ glm(intervention ~ value, family = "binomial", data = .x)) %>% 
   map_df(broom::tidy, .id = "binomial")
-
-contrast %>% group_by(scale, pseudo_id) %>%
-  summarise(delta_value = dplyr::last(value)-dplyr::first(value)) %>% 
-  split(.$scale) %>%
-  map(~ .x$delta_value %>% summary() %>% broom::tidy())
-
-contrast %>% pivot_wider(id_cols = c(scale,pseudo_id),
-                         names_from = intervention,
-                         values_from = value) %>% 
-  rename(no_interv = `0`, interv = `1`) %>% 
-  mutate()
-
-
 
 
 
