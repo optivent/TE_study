@@ -401,7 +401,19 @@ count_scores$ppmd <- longitudinal %>%
             ~ tidyr::replace_na(.,0) * 100/sum(., na.rm = TRUE)
   ) 
 
-count_scores %>% map(~ mutate_all(.x, ~ as.integer(.))) # the procents per each scale
+
+count_scores %>%
+  map(~ .x %>% mutate_all(~ as.integer(.))) %>% 
+  map(~ .x %>% rename(scale_value = 1)) %>% 
+  map_dfr(~ .x %>% 
+            pivot_longer(-scale_value,
+                         names_to = "intervention",
+                         values_to = "count") %>% 
+            arrange(intervention),
+          .id = "scale") %>% View()
+  mutate(expanded = rep()) 
+
+
 
 # interventions and faces, 128 children
 
@@ -419,7 +431,7 @@ custom_sum <- function(df, col){
         ungroup() %>% 
         pivot_wider(id_cols = pseudo_id, names_from = interv, values_from = c(min,max)) %>% 
         select(pseudo_id, max_0, min_1) %>% 
-        pivot_longer(-pseudo_id, names_to = "intervention", values_to = "scale") %>% 
+        pivot_longer(-pseudo_id, names_to = "intervention", values_to = "value") %>% 
         mutate(intervention = ifelse(intervention == "max_0", 0, 1)) 
   return(df)
 }
@@ -428,14 +440,30 @@ contrast <- list()
 contrast$faces <- custom_sum(longitudinal, col = faces) 
 contrast$kuss <- custom_sum(longitudinal, col = kuss)
 contrast$ppmd <- custom_sum(longitudinal, col = ppmd)
+contrast <- contrast %>% map_dfr(~ .x, .id = "scale")
 rm(custom_sum)
 
-
 library(lme4)
+library(broom)
 
-m <- glmer(intervention ~ scale + (1 | pseudo_id),
-           data = contrast$faces)
-lmer(formula = intervention ~ scale + (1|pseudo_id),
-     data = contrast$faces) %>% broom::tidy()
+contrast %>% group_split(scale) %>% 
+map( ~ glm(intervention ~ value, family = "binomial", data = .x)) %>% 
+map_df(broom::tidy, .id = "binomial")
+
+contrast %>% group_by(scale, pseudo_id) %>%
+  summarise(delta_value = dplyr::last(value)-dplyr::first(value)) %>% 
+  split(.$scale) %>%
+  map(~ .x$delta_value %>% summary() %>% broom::tidy())
+
+contrast %>% pivot_wider(id_cols = c(scale,pseudo_id),
+                         names_from = intervention,
+                         values_from = value) %>% 
+            rename(no_interv = `0`, interv = `1`) %>% 
+            mutate()
   
+
+
+
+    
+
 
