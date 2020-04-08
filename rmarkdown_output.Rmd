@@ -1,0 +1,102 @@
+---
+title: "production"
+author: "A.I. Georgevici"
+date: "8 4 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+```
+
+
+
+I’ve been publishing screencasts demonstrating how to use the tidymodels framework, from first steps in modeling to how to tune more complex models. Today, I’m using this week’s #TidyTuesday dataset on beer production to show how to use bootstrap resampling to estimate model parameters.
+```{r import data, message=FALSE}
+
+library(tidyverse)
+library(tidymodels)
+
+brewing_materials_raw <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-03-31/brewing_materials.csv")
+
+brewing_materials_raw %>%
+  count(type, wt = month_current, sort = TRUE)
+```
+
+
+### How have some different brewing materials changed over time?
+```{r VIZ evolution of materials over time}
+
+brewing_filtered <- brewing_materials_raw %>%
+  filter(
+    type %in% c(
+      "Malt and malt products",
+      "Sugar and syrups",
+      "Hops (dry)"
+    ),
+    year < 2016,
+    !(month == 12 & year %in% 2014:2015)
+  ) %>%
+  mutate(
+    date = paste0(year, "-", month, "-01"),
+    date = lubridate::ymd(date)
+  )
+
+brewing_filtered %>%
+  ggplot(aes(date, month_current, color = type)) +
+  geom_point()
+
+
+```
+
+
+
+Below a linear model between the "malt products" and "sugar and syrups"
+```{r VIZ linear models malt and sugar}
+
+brewing_materials <- brewing_filtered %>%
+  select(date, type, month_current) %>%
+  pivot_wider(
+    names_from = type,
+    values_from = month_current
+  ) %>%
+  janitor::clean_names()
+
+brewing_materials %>%
+  ggplot(aes(malt_and_malt_products, sugar_and_syrups)) +
+  geom_smooth(method = "lm") +
+  geom_point()
+```
+
+
+In the next steps we build a linear model
+```{r the linear model}
+
+beer_fit <- lm(sugar_and_syrups ~ 0 + malt_and_malt_products,
+  data = brewing_materials
+)
+
+summary(beer_fit)
+
+tidy(beer_fit)
+
+```
+
+
+## Bootstrap resampling
+```{r bootstrap resampling}
+set.seed(123)
+beer_bot <- bootstraps(brewing_materials, times = 1e3, apparent = TRUE)
+```
+
+
+We train a model to each of those bootstrap resamples.
+```{r}
+beer_models <- beer_bot %>% 
+  mutate(
+    model = map(splits, ~ lm(sugar_and_syrups ~ 0 + malt_and_malt_products, data = .)),
+    coef_info = map(model, tidy)
+  )
+```
+
+

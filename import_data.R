@@ -457,9 +457,16 @@ contrast %>% map_dfr(~ .x, .id = "scale") %>%
 library(lme4)
 library(broom)
 
-contrast %>%
-  map( ~ glm(intervention ~ value, family = "binomial", data = .x)) %>% 
-  map_df(broom::tidy, .id = "binomial")
+contrast %>% 
+  map( ~ glm(interv ~ med, family = "binomial", data = .x)) %>% 
+  map_dfr(broom::tidy, .id = "scale") %>% group_split(scale)
+
+
+longitudinal %>% select(pseudo_id, faces, kuss, ppmd, interv) %>% 
+  group_by(pseudo_id) %>% 
+    sample_n(size = 1, replace = TRUE)
+
+library(tidymodels)
 
 
 
