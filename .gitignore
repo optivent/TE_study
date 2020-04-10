@@ -4,3 +4,5 @@
 .Ruserdata.
 /input
 rmarkdown_output.html
+rmarkdown_output.Rmd
+rmarkdown_output.pdf

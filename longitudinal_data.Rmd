@@ -1,0 +1,215 @@
+---
+title: "Longitudinal Data FACES, KUSS, PPMD"
+author: "A.I. Georgevici"
+date: "9 4 2020"
+output: html_document
+
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+Sys.setenv(LANG = "en")
+
+library(tidyverse)
+library(purrr)
+library(readxl)
+library(janitor)
+library(gt)
+library(here)
+library(magrittr)
+library(janitor)
+
+path <- here("input/Rohdaten pro Patient")
+```
+
+```{r import the data}
+longitudinal <- list.files(here("input/Rohdaten pro Patient"), pattern = ".xlsx") %>% 
+  map_dfr(~ readxl::read_xlsx(
+                path = paste0(path, "/", .x),
+                range = cell_cols("A:Z"),
+                col_types = "text" # import everyhting as text 
+            ) %>%
+        dplyr::select(-Time) %>% 
+        janitor::remove_empty("rows") %>% 
+        janitor::clean_names() %>% 
+        rename(pseudo_id = pseudo, real_id = rea_i_id) %>% 
+        drop_na(c(pseudo_id, real_id)) %>% # the rows without id are empty rows
+        mutate(time = dplyr::row_number()) %>% 
+        select(matches("id"), time, everything()) %>%  # the observations are in order
+        mutate_at(vars(p1:interv), 
+                  function(x) {
+                    replace_na(x, 0) %>% # no entry represents 0
+                    na_if("N") %>% # "N" represents Not_Available
+                    as.integer() 
+                  }
+        ) 
+  )
+```
+
+## Import the data
+
+### Following assumptions:
+
+* the rows are in chronological order, rows with no entry still have the time axis
+* in the variables: "p1, p2, p3 ... interv" no entry represents a "0" and "N" represents N/A (not available)
+
+
+### A quick birds-eye view of the column structure
+```{r data structure 1}
+longitudinal
+```
+
+### The percent of missing values per column. By study design, a patient has either FACES or KUSS values (never both)
+```{r data structure 2}
+library(DataExplorer)
+DataExplorer::plot_missing(longitudinal, theme_config = list(legend.position = NULL)) # without legend
+```
+
+### A summary of the percentiles of numeric columns
+```{r data structure 3}
+library(skimr)
+library(gt)
+longitudinal %>% select_if(is.numeric) %>% 
+  skim() %>% as_tibble() %>% select_all(~str_replace_all(., "skim_|numeric.", "")) %>%
+  transmute(variable, missing_rate = 100*(1 - complete_rate), mean, sd, hist ) %>% 
+  gt()
+```
+
+### The structure of KUSS
+
+* kuss takes the max value from "kuss" or "sum of w, g, r, b, m"
+* replace the "w,g,r,b,m" with NA if kuss is NA
+
+```{r sync KUSS with sum of the sub-items}
+psum <- function(...,na.rm=FALSE) { 
+    rowSums(do.call(cbind,list(...)),na.rm=na.rm) } 
+
+longitudinal %<>% mutate(kuss = pmax(kuss, psum(w,g,r,b,m, na.rm = FALSE), na.rm = TRUE)) %>%  
+                  mutate_at(vars(w:m), ~ ifelse(is.na(kuss), NA, .)) 
+```
+
+In the missing_rate the percent of missing "w, g, r, b, m" when FACES is available !
+```{r missing kuss sub_items}
+
+longitudinal %>% drop_na(kuss) %>% select(w:m) %>% 
+  skim() %>% as_tibble() %>% select_all(~str_replace_all(., "skim_|numeric.", "")) %>%
+  transmute(variable, missing_rate = 100*(1 - complete_rate), mean, sd, hist ) %>% 
+  gt()
+```
+
+The distribution of KUSS in percents of observations per sum of KUSS
+```{r VIZ distribution of KUSS}
+ggplot(
+  data = count(longitudinal, kuss) %>%
+    mutate(kuss = replace_na(kuss, "missing"), n = n/nrow(longitudinal))
+  ) +
+  geom_bar(aes(kuss, n), stat="identity") + 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+```
+
+
+The values in the original PPMD, there's a value "2" and "6".
+Those values are corrected to 1. 
+```{r the values in original ppmd}
+longitudinal %>% pivot_longer(p1:p15) %>% distinct(name, value) %>% count(value)
+longitudinal %<>% mutate_at(vars(p1:p15), ~ ifelse(. > 1, 1, .))
+```
+
+There are also missing values mixed with present values. Imputing 0 in those columns
+At time1 (Aufwachraum) the PPMD is NA, imputing NA in those rows. 
+```{r missing values mixed with present values in ppmd, sum of ppmd subitems}
+longitudinal %>% mutate(nrNA = rowSums(is.na(select(., p1:p15)))) %>%
+  filter(!nrNA %in% c(0,15)) %>% gt()
+
+longitudinal %<>% mutate(nrNA = rowSums(is.na(select(., p1:p15)))) %>% 
+  mutate_at(
+    vars(p1:p15), 
+    ~ ifelse(nrNA %in% c(1:14) & is.na(.), 0, .)
+  ) %>% 
+  mutate_at(
+    vars(p1:p15), 
+    ~ ifelse(time == 1, NA, .)
+  ) %>% 
+  select(-nrNA) %>% 
+  mutate(
+    ppmd = rowSums(select(., p1:p15)) 
+  ) 
+```
+
+The distribution of PPMD in percents of observations per sum of ppmd
+```{r VIZ distribution of PPMD}
+ggplot(
+  data = count(longitudinal, ppmd) %>%
+    mutate(ppmd = replace_na(ppmd, "missing"), n = n/nrow(longitudinal))
+  ) +
+  geom_bar(aes(ppmd, n), stat="identity") + 
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+```
+
+The number of observations per patient (pseudo_id)
+```{r number of observations per patient}
+longitudinal %>% count(pseudo_id) %>% count(n) %>% rename(nr_of_obs_per_pat = n, nr_of_pat = nn) %>% ggplot(.) + geom_bar(aes(nr_of_obs_per_pat, nr_of_pat), stat = "identity")
+```
+
+The number of interventions and non-interventions
+```{r}
+longitudinal %>% count(interv) %>% gt()
+```
+
+The number of observations (clustered per intervention) with the sum of FACES 
+```{r}
+longitudinal %>%
+  mutate(
+    sum_scales = rowSums(
+      select(., kuss, faces, ppmd),
+      na.rm = TRUE)
+  ) %>%
+  select(pseudo_id, time, kuss, faces, ppmd, sum_scales, interv) %>% 
+  filter(sum_scales < 1) %>% 
+  group_split(interv) %>% 
+  map(~ head(.x, 20))
+  
+```
+
+A dataset with a positive sum_scales (> 0)
+
+```{r}
+# the dataset with positive sum_scales(> 0)
+positive <- longitudinal %>%  
+  mutate(
+    sum_scales = rowSums(
+      select(., kuss, faces, ppmd),
+      na.rm = TRUE)
+  ) %>%
+  filter(sum_scales > 0)
+
+library(feather)
+feather::write_feather(positive, path = here("input/positive.feather"))
+
+positive 
+```
+
+Kuss Scale: n = nr. of children, interv (0/1) no intervention / intervention
+```{r}
+positive %>% group_by(interv) %>% count(kuss) %>% split(.$interv)
+```
+
+Faces Scale: n = nr. of children, interv (0/1) no intervention / intervention
+```{r}
+positive %>% group_by(interv) %>% count(faces) %>% split(.$interv)
+```
+
+PPMD Scale: n = nr. of children, interv (0/1) no intervention / intervention
+```{r}
+positive %>% group_by(interv) %>% count(ppmd) %>% split(.$interv)
+```
+
+
+
+`r longitudinal %>% filter(interv == 1) %>% pull(pseudo_id) %>% unique() %>% length()` children that had intervention from a total of `r longitudinal %>% pull(pseudo_id) %>% unique() %>% length()`.
+
+Below the number of interventions per children
+
+```{r}
+longitudinal %>% filter(interv == 1) %>% count(pseudo_id) %>% arrange(desc(n)) %>% count(n) %>% rename(nr_of_interv_per_children = n, nr_of_children = nn) %>% gt()
+```
+
